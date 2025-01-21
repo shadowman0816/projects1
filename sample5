@@ -1,0 +1,389 @@
+Use Case Analysis
+Current Behavior:
+Payroll submissions are processed the same day.
+ACH instructions are submitted to the ACH system around 4 PM for the current day's payroll.
+ACH processes the instructions and completes the money movement by the end of the day.
+Future Use Case:
+Employers can schedule payroll for a future date (e.g., one or two weeks in advance).
+The system should ensure:
+Validation of payroll data at submission time.
+Storage of the instructions with a scheduled execution date.
+Timely submission of instructions to the ACH system on the specified processing date (around 4 PM).
+The architecture must support job scheduling, idempotency, and error handling.
+High-Level Solution
+We can introduce a scheduled processing architecture to handle future-dated payroll submissions. The key components include:
+
+Validation and Storage:
+Validate and store payroll data along with the processing date during submission.
+Scheduler/Worker:
+Use a job scheduler (e.g., Quartz Scheduler, AWS EventBridge, or a custom CRON job) to execute future-dated ACH instructions.
+ACH Submission:
+On the scheduled processing date, retrieve the payroll instructions and submit them to the ACH system.
+Resiliency:
+Ensure fault tolerance by re-attempting failed ACH submissions.
+Audit and Notifications:
+Log every step and notify stakeholders in case of errors or successful execution.
+Proposed Architecture
+1. Components
+
+Payroll Application (UI):
+Allows employers to schedule payroll for future dates.
+Sends the request to the backend with the processing date.
+CIB:
+Validates the payroll submission and forwards it to CCB.
+CCB (Processing Layer):
+Stores payroll instructions in a database with the processing date.
+Triggers the scheduler for future-dated submissions.
+ACH System:
+Processes payroll instructions submitted on the processing date.
+2. Data Flow
+
+Payroll Submission:
+Employer submits payroll with a future processing date.
+The request flows through CIB to CCB.
+CCB validates and stores the payroll in a database.
+Scheduling:
+A scheduler triggers a job on the processing date.
+The job retrieves payroll instructions for the day and submits them to ACH.
+ACH Processing:
+ACH processes the instructions and moves money to employee accounts.
+Detailed Steps
+Step 1: Update Payroll Submission Flow
+
+UI Changes:
+Add an option for employers to select a processing date during payroll submission.
+Backend Changes:
+Update the API to accept a processing_date parameter.
+Validate that the processing date is in the future and within a valid range (e.g., up to 30 days).
+Store Instructions:
+Store the payroll details along with the processing date in a database table, e.g., pyrl_scheduled_instructions:
+CREATE TABLE pyrl_scheduled_instructions (
+    instruction_id UUID PRIMARY KEY,
+    employer_id UUID,
+    payroll_data JSONB,
+    processing_date DATE,
+    status VARCHAR(32) DEFAULT 'PENDING',
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+Step 2: Implement Scheduler
+
+Choose a Scheduler:
+Use a tool like Quartz Scheduler (Java), AWS EventBridge, or Spring Batch.
+Scheduling Logic:
+At regular intervals (e.g., daily), fetch all PENDING instructions for the current date and schedule them for submission to ACH at 4 PM.
+Job Execution:
+At 4 PM, execute the scheduled jobs:
+Retrieve the payroll data.
+Submit the ACH instructions.
+Mark the instruction as COMPLETED or FAILED based on the outcome.
+Step 3: ACH Integration
+
+Submit to ACH:
+Use the existing ACH integration to submit payroll instructions.
+Ensure the ACH system receives the correct processing date.
+Handle Failures:
+Implement retry logic for transient failures (e.g., network issues).
+Notify stakeholders in case of persistent failures.
+Step 4: Audit and Notifications
+
+Logging:
+Log every action (e.g., scheduling, execution, submission) for traceability.
+Notifications:
+Send notifications to employers if a scheduled payroll fails.
+Technology Stack
+Backend:
+Spring Boot with Quartz Scheduler (for job scheduling).
+PostgreSQL for storing payroll instructions.
+Scheduler:
+Quartz Scheduler or AWS EventBridge.
+Messaging:
+Kafka or RabbitMQ for event-driven communication (optional).
+Monitoring:
+Use tools like Splunk, CloudWatch, or Prometheus for monitoring and logging.
+Sequence Diagram
+Employer           Payroll App (UI)           CIB             CCB                ACH System
+    |                     |                    |                 |                   |
+    | Submit Payroll      |                    |                 |                   |
+    |-------------------->|                    |                 |                   |
+    |                     | Validate Payroll   |                 |                   |
+    |                     |------------------->|                 |                   |
+    |                     |                    | Validate Payroll|                   |
+    |                     |                    |---------------->|                   |
+    |                     |                    | Store Instruction|                  |
+    |                     |                    |---------------->|                   |
+    |                     |                    | Schedule Job     |                  |
+    |                     |                    |---------------->|                   |
+    |                     |                    |                 |                   |
+    |                     |                    | On Processing Date                 |
+    |                     |                    |---------------->| Submit Instruction|
+    |                     |                    |                 |------------------>|
+    |                     |                    |                 | Response          |
+    |                     |                    |                 |<------------------|
+Future Enhancements
+Recurring Payroll:
+Allow employers to set up recurring payroll schedules (e.g., bi-weekly).
+Real-Time Notifications:
+Notify employers when the payroll is processed.
+Multi-Day Batching:
+Batch multiple payroll instructions for efficiency.
+Benefits of This Architecture
+Scalability:
+Handles large volumes of scheduled payroll submissions.
+Flexibility:
+Employers can schedule payroll for any future date.
+Resiliency:
+Fault-tolerant with retries and error handling.
+Let me know if you'd like further details or specific code examples!
+
+
+Alternative Approach: Dynamic ACH Instruction Handling
+Instead of batching payroll submissions for a specific processing date, the ACH system can be enhanced to handle future-dated instructions dynamically. This means you can send instructions immediately upon payroll submission, and ACH would internally manage the scheduling and processing on the desired date.
+
+How It Works
+
+Immediate Instruction Submission:
+When payroll is submitted by the employer, CCB immediately sends the instruction to ACH with a processing_date.
+ACH System Enhancements:
+ACH stores the instruction with the processing_date and queues it for execution on the specified date.
+ACH processes the instructions automatically on the scheduled date without requiring a new submission.
+Real-Time Monitoring:
+ACH provides real-time APIs to query the status of instructions (e.g., PENDING, PROCESSED, FAILED).
+Feedback to CCB:
+ACH sends asynchronous callbacks or notifications to CCB upon successful or failed execution of an instruction.
+Steps to Implement
+
+Modify ACH API to Accept Future-Dated Instructions:
+Add a processing_date parameter to the ACH submission API.
+Example:
+{
+    "instruction_id": "123456",
+    "amount": 5000.00,
+    "funding_account": "987654321",
+    "recipient_account": "123456789",
+    "processing_date": "2025-02-01"
+}
+ACH Internal Scheduling:
+ACH stores the instruction with its metadata, including the processing date.
+ACH schedules the instruction internally and processes it on the specified date.
+Real-Time Status Tracking:
+ACH provides APIs for CCB to query the status of an instruction:
+Example endpoints:
+GET /instructions/{instruction_id}/status
+GET /instructions?processing_date=2025-02-01
+Example response:
+{
+    "instruction_id": "123456",
+    "status": "PENDING",
+    "scheduled_for": "2025-02-01"
+}
+Asynchronous Notifications:
+ACH sends callbacks to CCB upon instruction execution:
+Success callback:
+{
+    "instruction_id": "123456",
+    "status": "PROCESSED",
+    "processed_at": "2025-02-01T16:00:00Z"
+}
+Failure callback:
+{
+    "instruction_id": "123456",
+    "status": "FAILED",
+    "error_code": "INSUFFICIENT_FUNDS",
+    "error_message": "Funding account has insufficient funds."
+}
+Benefits of Dynamic Instruction Handling
+Real-Time Submission:
+Instructions are submitted immediately upon payroll creation, reducing latency and dependency on external schedulers.
+Reduced Complexity in CCB:
+CCB no longer needs to manage future-dated scheduling or batching logic. The responsibility shifts to ACH.
+Flexibility:
+ACH can dynamically handle a mix of same-day and future-dated instructions without requiring separate processes.
+Improved Monitoring:
+Real-time APIs and asynchronous notifications enable better visibility into instruction statuses.
+Proposed Data Flow
+Employer           Payroll App (UI)           CIB             CCB                ACH System
+    |                     |                    |                 |                   |
+    | Submit Payroll      |                    |                 |                   |
+    |-------------------->|                    |                 |                   |
+    |                     | Validate Payroll   |                 |                   |
+    |                     |------------------->|                 |                   |
+    |                     |                    | Validate Payroll|                   |
+    |                     |                    |---------------->|                   |
+    |                     |                    | Submit Instruction                 |
+    |                     |                    |---------------->| Store Instruction|
+    |                     |                    |                 | Process On Date  |
+    |                     |                    |                 |------------------>|
+    |                     |                    |                 | Notify CCB       |
+    |                     |                    |                 |<------------------|
+Implementation Considerations
+1. CCB Adjustments
+
+Remove internal scheduling for future-dated payroll.
+Modify the submission logic to always send instructions to ACH immediately upon payroll submission.
+Handle asynchronous callbacks from ACH for success or failure.
+2. ACH System Enhancements
+
+Introduce a processing_date field in the ACH instruction schema.
+Implement a scheduling mechanism to process instructions on their scheduled date.
+Provide real-time APIs for querying instruction status.
+Support asynchronous notifications for instruction execution.
+3. Resiliency
+
+Ensure ACH retries failed instructions automatically for transient issues (e.g., network failures).
+Allow CCB to resubmit instructions manually if needed.
+Comparison of Approaches
+Feature	Existing Batch System	Dynamic ACH Handling
+Submission Timing	Batched at 4 PM on processing day	Immediate upon payroll submission
+Processing	Requires CCB scheduling	ACH handles scheduling internally
+Real-Time Feedback	Limited	Real-time APIs and notifications
+Complexity in CCB	High	Reduced
+Flexibility	Limited to batch processing	Supports same-day and future-dated processing seamlessly
+Resiliency	CCB handles retries	ACH handles retries internally
+Next Steps
+Collaborate with ACH:
+Discuss the feasibility of adding processing_date to ACH instructions.
+Ensure ACH can handle future-dated scheduling internally.
+Prototype the API Changes:
+Update ACH API to accept processing_date.
+Implement status tracking and notifications.
+Refactor CCB:
+Remove internal scheduling logic.
+Modify the submission flow to send instructions immediately.
+Testing and Validation:
+Test the end-to-end flow with both same-day and future-dated payroll.
+Conclusion
+Dynamic ACH instruction handling simplifies the architecture by shifting the responsibility for scheduling and future-dated processing to ACH. This approach reduces complexity, improves flexibility, and enables better monitoring and resiliency.
+
+1. Event-Driven Architecture with Delayed Messaging
+Overview
+
+Instead of using a batch job, leverage an event-driven architecture with a message broker that supports delayed messages (e.g., RabbitMQ with delayed exchange, AWS SQS with delay, or Kafka with scheduling support). The payroll instruction is submitted as a message to the broker with a delay corresponding to the processing date.
+
+Flow
+
+Payroll Submission:
+Employer submits payroll with a future processing date.
+CCB validates the request and sends a delayed message to the queue.
+Delayed Message:
+The message broker holds the message until the specified delay elapses (future processing date).
+ACH Submission:
+When the delay expires, the message is consumed, and the ACH system processes the payroll instruction.
+Advantages
+
+Simplified Scheduling: The message broker handles scheduling based on the delay.
+Scalability: Supports large volumes of future-dated payroll instructions without additional infrastructure.
+Resiliency: Built-in retry mechanisms in message brokers ensure reliable delivery.
+Example Tools
+
+RabbitMQ with Delayed Exchange:
+Send the message with a delay header (e.g., x-delay).
+AWS SQS with Delay:
+Set the delay parameter when sending the message.
+Kafka with a Scheduler:
+Use Kafka topics with scheduled processing.
+
+2. Database-Based Triggering
+Overview
+
+Store payroll instructions in a database table with a processing_date and use a real-time query-based listener to identify instructions ready for processing.
+
+Flow
+
+Payroll Submission:
+Employer submits payroll with a future processing date.
+Instructions are stored in a database table (e.g., pyrl_scheduled_instructions).
+Real-Time Query Listener:
+Use a listener or polling mechanism (e.g., PostgreSQL LISTEN/NOTIFY, Change Data Capture with Debezium) to monitor the database for instructions where processing_date = CURRENT_DATE.
+ACH Submission:
+When an instruction becomes ready, it is retrieved and submitted to the ACH system.
+Advantages
+
+No External Scheduling: Relies on the database for triggering instructions.
+Simplicity: Easy to implement with existing database systems.
+Transactional Integrity: Works well in transactional environments.
+Implementation Options
+
+PostgreSQL LISTEN/NOTIFY:
+Use triggers to notify the application when an instruction becomes due.
+Debezium:
+Monitor changes to the processing_date column and act on updates.
+3. Real-Time Processing with ACH API Enhancements
+Overview
+
+Work with ACH to enhance their API to support real-time instruction submission. Instead of submitting instructions in bulk, instructions are submitted one at a time as they become ready.
+
+Flow
+
+Payroll Submission:
+Employer submits payroll with a future processing date.
+Instructions are stored in the database.
+Processing Logic:
+Use a small service or cron job to periodically check for instructions due for processing (e.g., every minute).
+ACH Submission:
+Submit each instruction immediately as it becomes ready.
+Advantages
+
+Simplified Integration: Leverages existing ACH APIs.
+Flexibility: ACH can process both same-day and future-dated instructions dynamically.
+Reduced Complexity: Removes the need for batching.
+Key Requirements
+
+ACH must support accepting and scheduling individual future-dated instructions.
+Callback or webhook mechanisms to confirm processing success.
+4. Distributed Scheduling with External Tools
+Overview
+
+Use an external distributed scheduling service (e.g., AWS Step Functions, Temporal.io, or Apache Airflow) to schedule payroll submissions for future processing.
+
+Flow
+
+Payroll Submission:
+Employer submits payroll with a future processing date.
+CCB schedules a task with the distributed scheduler.
+Task Execution:
+On the processing date, the scheduler triggers the task to process the payroll instruction.
+ACH Submission:
+The task submits the instruction to the ACH system.
+Advantages
+
+Scalability: Distributed schedulers handle large volumes efficiently.
+Reliability: Built-in fault tolerance and retry mechanisms.
+Flexibility: Supports dynamic scheduling and chaining workflows.
+Example Tools
+
+AWS Step Functions:
+Define a state machine for payroll submission and scheduling.
+Temporal.io:
+Use workflows to manage future-dated instructions.
+Apache Airflow:
+Schedule DAGs for processing instructions on specific dates.
+Comparison of Approaches
+Feature	Event-Driven (Delayed Messaging)	Database-Based Triggering	Real-Time ACH API	Distributed Scheduling
+Complexity	Moderate	Low	Low	High
+Scalability	High	Moderate	High	High
+Reliability	High	Moderate	High	High
+ACH Dependency	No	No	Yes	No
+Scheduling Granularity	Milliseconds	Seconds to Minutes	Milliseconds	Milliseconds
+Resiliency	Built-in retries	Requires custom handling	Built-in	Built-in
+Recommended Approach
+If ACH Can Be Enhanced:
+Use Real-Time ACH API Enhancements for a seamless, low-latency solution.
+Ideal for reducing complexity and leveraging ACH capabilities.
+If ACH Can't Be Enhanced:
+Event-Driven Architecture with Delayed Messaging is the best alternative.
+It is scalable, reliable, and fits well into modern architectures.
+If You Need Simplicity:
+Use Database-Based Triggering for straightforward implementation.
+This is effective if the volume of payroll instructions is manageable.
+For Large Enterprises:
+Use Distributed Scheduling if you need advanced workflows, dependencies, or complex scheduling logic.
+Next Steps
+Collaborate with ACH:
+Discuss real-time instruction handling or future-dated scheduling support.
+Evaluate Messaging Systems:
+If ACH enhancements are not feasible, evaluate delayed messaging with RabbitMQ, AWS SQS, or Kafka.
+Prototype:
+Implement and test the selected approach with a subset of payroll instructions.
+Monitoring and Logging:
+Ensure detailed logs and monitoring are in place to track instruction lifecycles.

@@ -1,0 +1,106 @@
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.retry.annotation.EnableRetry;
+import org.springframework.scheduling.annotation.EnableAsync;
+
+@SpringBootApplication
+@EnableAsync
+@EnableRetry
+public class PayrollApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(PayrollApplication.class, args);
+    }
+}
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Component;
+
+import java.util.Date;
+
+@Aspect
+@Component
+public class ActivityLogAspect {
+
+    private final ActivityLogRepository activity
+@Autowired
+public ActivityLogAspect(ActivityLogRepository activityLogRepository) {
+    this.activityLogRepository = activityLogRepository;
+}
+
+@Before("@annotation(activityLog) && args(payload,..)")
+public void logActivity(JoinPoint joinPoint, ActivityLog activityLog, Object payload) {
+    // Create a new log entry
+    PyrlActivityLogEntity log = new PyrlActivityLogEntity();
+
+    String methodName = joinPoint.getSignature().getName();
+    String className = joinPoint.getTarget().getClass().getSimpleName();
+
+    log.setApi(className + "." + methodName);
+    log.setApiVersion(activityLog.apiVersion());
+    log.setRqstPayLoad(truncatePayload(payload != null ? payload.toString() : null, 1000));
+    log.setCreTs(new Date());
+    log.setUpdtTs(new Date());
+
+    // Save log asynchronously with retry
+    saveLogAsync(log);
+}
+
+@Async("activityLogExecutor") // Use the custom thread pool
+@Retryable(
+    value = Exception.class, // Retry on any exception
+    maxAttempts = 3,         // Retry up to 3 times
+    backoff = @Backoff(delay = 2000, multiplier = 1.5) // Initial delay of 2 seconds, with 1.5x multiplier
+)
+public void saveLogAsync(PyrlActivityLogEntity log) {
+    try {
+        activityLogRepository.save(log);
+    } catch (Exception e) {
+        // Handle logging failure (e.g., log it to a monitoring system)
+        System.err.println("Failed to save activity log: " + e.getMessage());
+        throw e; // Rethrow the exception for retry to work
+    }
+}
+
+private String truncatePayload(String payload, int maxLength) {
+    if (payload == null) {
+        return null;
+    }
+    return payload.length() > maxLength ? payload.substring(0, maxLength) + "..." : payload;
+}
+
+---
+
+### **4. Optional: Add a Recovery Method**
+You can add a fallback or recovery method in case all retries fail. Use the `@Recover` annotation for this purpose.
+
+```java
+import org.springframework.retry.annotation.Recover;
+
+@Recover
+public void recover(Exception e, PyrlActivityLogEntity log) {
+    // Fallback logic if retries fail
+    System.err.println("Failed to save activity log after retries: " + e.getMessage());
+    // Optionally, save to a fallback system or alert the team
+}
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.Executor;
+
+@Configuration
+public class AsyncConfig {
+
+    @Bean(name = "activityLogExecutor")
+    public Executor activityLogExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5); // Minimum number of threads
+        executor.setMaxPoolSize(10); // Maximum number of threads
+        executor.setQueueCapacity(25); // Queue size
+        executor.setThreadNamePrefix("ActivityLog-");
+        executor.initialize();
+        return executor;
+    }
+}

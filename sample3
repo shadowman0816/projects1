@@ -1,0 +1,171 @@
+<dependency>
+    <groupId>org.springframework.retry</groupId>
+    <artifactId>spring-retry</artifactId>
+</dependency>
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.retry.annotation.EnableRetry;
+
+@Configuration
+@EnableRetry
+public class RetryConfig {
+}
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+
+@ControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<String> handleBusinessException(BusinessException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleGeneralException(Exception ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred.");
+    }
+}
+
+@Service
+@Loggable
+public class EmployeeOnboardingStatusService {
+
+    private final CibGustoProxyClient cibGustoProxyClient;
+    private final ObjectMapper objectMapper;
+
+    @Value("${cib_resource.host}")
+    private String cibHost;
+
+    @Value("${cib_resource.version}")
+    private String cibVersion;
+
+    @Autowired
+    public EmployeeOnboardingStatusService(CibGustoProxyClient cibGustoProxyClient, ObjectMapper objectMapper) {
+        this.cibGustoProxyClient = cibGustoProxyClient;
+        this.objectMapper = objectMapper;
+    }
+
+    @Retryable(
+        value = Exception.class,
+        maxAttempts = 3,
+        backoff = @Backoff(delay = 2000, multiplier = 2)
+    )
+    public EmployeeOnboardingResponse getOnboardingStatus(final String employeeId, final String token) {
+        try {
+            String endpoint = String.format("%s/%s/employees/%s/onboarding_status", cibHost, cibVersion, employeeId);
+            String response = cibGustoProxyClient.get(endpoint, token);
+            return objectMapper.readValue(response, EmployeeOnboardingResponse.class);
+        } catch (Exception e) {
+            throw new BusinessException("Unable to get Employee Onboarding Status from Gusto.", e);
+        }
+    }
+
+    @Transactional
+    @Retryable(
+        value = Exception.class,
+        maxAttempts = 3,
+        backoff = @Backoff(delay = 2000, multiplier = 2)
+    )
+    public EmployeeOnboardingResponse updateOnboardingStatus(final String employeeId, final EmployeeOnboardingRequest request, final String token) {
+        try {
+            String endpoint = String.format("%s/%s/employees/%s/onboarding_status", cibHost, cibVersion, employeeId);
+            String response = cibGustoProxyClient.put(endpoint, token, request);
+            return objectMapper.readValue(response, EmployeeOnboardingResponse.class);
+        } catch (Exception e) {
+            throw new BusinessException("Unable to update Employee Onboarding Status to Gusto.", e);
+        }
+    }
+}
+
+@Service
+@Loggable
+public class EmployeeSendInviteService {
+
+    private final CibGustoProxyClient cibGustoProxyClient;
+    private final ObjectMapper objectMapper;
+    private static final String EMPLOYEE_SEND_INVITE_ENDPOINT = "/send-invite";
+
+    @Autowired
+    public EmployeeSendInviteService(CibGustoProxyClient cibGustoProxyClient, ObjectMapper objectMapper) {
+        this.cibGustoProxyClient = cibGustoProxyClient;
+        this.objectMapper = objectMapper;
+    }
+
+    @Transactional
+    @Retryable(
+        value = Exception.class,
+        maxAttempts = 3,
+        backoff = @Backoff(delay = 2000, multiplier = 2)
+    )
+    public EmployeeSendInviteResponse sendInviteToEmployee(final String employeeId, final EmployeeSendInviteRequest request, final String token) {
+        try {
+            String endpoint = String.format("%s/%s", EMPLOYEE_SEND_INVITE_ENDPOINT, employeeId);
+            String response = cibGustoProxyClient.post(endpoint, token, request);
+            return objectMapper.readValue(response, EmployeeSendInviteResponse.class);
+        } catch (Exception e) {
+            throw new BusinessException("Unable to send invite to employee for Gusto.", e);
+        }
+    }
+}
+
+@Service
+@Loggable
+public class PayeeService {
+
+    private final PayeeRepository payeeRepository;
+
+    @Autowired
+    public PayeeService(PayeeRepository payeeRepository) {
+        this.payeeRepository = payeeRepository;
+    }
+
+    @Transactional
+    public void saveOrUpdateEmployee(PayeeInformation request) {
+        validateRequest(request);
+
+        boolean isCompanyExists = payeeRepository.existsByCompanyId(request.getCompanyId());
+        if (!isCompanyExists) {
+            throw new BusinessException("Company ID not found in DB: " + request.getCompanyId());
+        }
+
+        Optional<PayeeEntity> existingPayee = payeeRepository.findByPayeeId(request.getPayeeId());
+        if (existingPayee.isPresent()) {
+            updateExistingPayee(existingPayee.get(), request);
+        } else {
+            insertNewPayee(request);
+        }
+    }
+
+    private void validateRequest(PayeeInformation request) {
+        if (request.getCompanyId() == null) {
+            throw new BusinessException("Company ID cannot be null.");
+        }
+        if (request.getPceEnrollmentId() == null) {
+            throw new BusinessException("PCE Enrollment ID cannot be null.");
+        }
+        if (request.getPayeeId() == null) {
+            throw new BusinessException("Payee ID cannot be null.");
+        }
+    }
+
+    private void updateExistingPayee(PayeeEntity payee, PayeeInformation request) {
+        payee.setFirstName(request.getFirstName());
+        payee.setLastName(request.getLastName());
+        payee.setPayeeType(request.getPayeeType());
+        payee.setUpdatedAt(LocalDateTime.now());
+        payeeRepository.save(payee);
+    }
+
+    private void insertNewPayee(PayeeInformation request) {
+        PayeeEntity newPayee = new PayeeEntity();
+        newPayee.setFirstName(request.getFirstName());
+        newPayee.setLastName(request.getLastName());
+        newPayee.setPayeeType(request.getPayeeType());
+        newPayee.setCreatedAt(LocalDateTime.now());
+        payeeRepository.save(newPayee);
+    }
+}

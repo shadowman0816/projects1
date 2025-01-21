@@ -1,0 +1,155 @@
+<dependency>
+    <groupId>com.h2database</groupId>
+    <artifactId>h2</artifactId>
+    <scope>test</scope>
+</dependency>
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/payroll_db
+    driver-class-name: org.postgresql.Driver
+    username: postgres
+    password: postgres
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+public OnboardingStatusResponse updateOnboardingStatus(String employeeId, String onboardingStatus) throws Exception {
+    String url = String.format("%s/employees/%s/onboarding_status", GUSTO_BASE_URL, employeeId);
+
+    // Build request payload
+    String requestBody = objectMapper.writeValueAsString(Map.of("onboarding_status", onboardingStatus));
+
+    // Create the HTTP request
+    HttpRequest request = HttpRequest.newBuilder()
+        .uri(URI.create(url))
+        .header("accept", "application/json")
+        .header("content-type", "application/json")
+        .method("PUT", HttpRequest.BodyPublishers.ofString(requestBody))
+        .build();
+
+    // Send the request
+    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+    if (response.statusCode() == 200) {
+        return objectMapper.readValue(response.body(), OnboardingStatusResponse.class);
+    } else if (response.statusCode() == 422) {
+        // Handle 422 errors
+        GustoErrorResponse errorResponse = objectMapper.readValue(response.body(), GustoErrorResponse.class);
+        throw new GustoValidationException("Validation Error", errorResponse);
+    } else {
+        throw new RuntimeException("Failed to update onboarding status. HTTP Status: " + response.statusCode());
+    }
+}
+
+package net.jpmchase.payroll.product.model;
+
+import java.util.List;
+
+public class GustoErrorResponse {
+    private List<ErrorDetail> errors;
+
+    public static class ErrorDetail {
+        private String errorKey;
+        private String category;
+        private String message;
+        private Metadata metadata;
+        private List<ErrorDetail> errors; // For nested errors
+
+        public static class Metadata {
+            private String contractorUuid;
+
+            // Getters and Setters
+        }
+
+        // Getters and Setters
+    }
+
+    // Getters and Setters
+}
+package net.jpmchase.payroll.product.exception;
+
+import net.jpmchase.payroll.product.model.GustoErrorResponse;
+
+public class GustoValidationException extends RuntimeException {
+
+    private final GustoErrorResponse errorDetails;
+
+    public GustoValidationException(String message, GustoErrorResponse errorDetails) {
+        super(message);
+        this.errorDetails = errorDetails;
+    }
+
+    public GustoErrorResponse getErrorDetails() {
+        return errorDetails;
+    }
+}
+@ControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(GustoValidationException.class)
+    public ResponseEntity<Object> handleGustoValidationException(GustoValidationException ex) {
+        GustoErrorResponse errorDetails = ex.getErrorDetails();
+        return ResponseEntity
+            .status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(errorDetails);
+    }
+}
+@Test
+void updateOnboardingStatus_ShouldHandleResourceErrors() {
+    String responseBody = """
+        {
+          "errors": [
+            {
+              "error_key": "first_name",
+              "category": "invalid_attribute_value",
+              "message": "First name is required"
+            },
+            {
+              "error_key": "date_of_birth",
+              "category": "invalid_attribute_value",
+              "message": "Date of birth is not a valid date"
+            }
+          ]
+        }
+        """;
+
+    // Mock response for 422
+    HttpResponse<String> mockResponse = mock(HttpResponse.class);
+    when(mockResponse.statusCode()).thenReturn(422);
+    when(mockResponse.body()).thenReturn(responseBody);
+
+    assertThrows(GustoValidationException.class, () -> {
+        gustoClient.updateOnboardingStatus("123", "onboarding_status");
+    });
+}
+@Test
+void updateOnboardingStatus_ShouldHandleNestedErrors() {
+    String responseBody = """
+        {
+          "errors": [
+            {
+              "error_key": "contractor_payments",
+              "category": "nested_errors",
+              "metadata": { "contractor_uuid": "72ae4617-daa9-4ed7-85e0-18ed5d0ee835" },
+              "errors": [
+                {
+                  "error_key": "hours",
+                  "category": "invalid_attribute_value",
+                  "message": "Ella Fitzgerald is paid fixed wage and hours cannot be set on a contractor payment"
+                }
+              ]
+            }
+          ]
+        }
+        """;
+
+    HttpResponse<String> mockResponse = mock(HttpResponse.class);
+    when(mockResponse.statusCode()).thenReturn(422);
+    when(mockResponse.body()).thenReturn(responseBody);
+
+    assertThrows(GustoValidationException.class, () -> {
+        gustoClient.updateOnboardingStatus("123", "onboarding_status");
+    });
+}

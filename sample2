@@ -1,0 +1,78 @@
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.parameters.Parameter;
+import io.swagger.v3.oas.models.media.StringSchema;
+import io.swagger.v3.oas.models.servers.Server;
+import org.springdoc.core.customizers.OpenApiCustomizer;
+import org.springframework.stereotype.Component;
+
+import java.util.Arrays;
+
+@Component
+public class SwaggerCustomHeaderConfig implements OpenApiCustomizer {
+
+    @Override
+    public void customise(OpenAPI openAPI) {
+        openAPI.getPaths().forEach((path, pathItem) -> 
+            pathItem.readOperations().forEach(operation -> {
+                if (!operationHasCommonHeaders(operation)) {
+                    addCommonHeaders(operation);
+                }
+            })
+        );
+    }
+
+    private boolean operationHasCommonHeaders(Operation operation) {
+        return operation.getParameters() != null &&
+               operation.getParameters().stream()
+                        .anyMatch(param -> "authorization".equalsIgnoreCase(param.getName()));
+    }
+
+    private void addCommonHeaders(Operation operation) {
+        operation.addParametersItem(new Parameter()
+                .in("header")
+                .name("authorization")
+                .description("OAuth bearer token")
+                .required(true)
+                .schema(new StringSchema())
+        );
+        operation.addParametersItem(new Parameter()
+                .in("header")
+                .name("trace-id")
+                .description("Unique Trace ID for debugging")
+                .required(false)
+                .schema(new StringSchema())
+        );
+    }
+}
+@Target({ElementType.METHOD})
+@Retention(RetentionPolicy.RUNTIME)
+@Operation
+public @interface CommonHeaders {
+    String summary() default "";
+    String description() default "";
+}
+@Operation(
+    summary = "Create a contractor",
+    description = "API Endpoint used to create an individual or business contractor.",
+    parameters = {
+        @Parameter(name = "ecid", description = "Unique ECID", required = true, in = ParameterIn.PATH),
+        @Parameter(name = "company-uuid", description = "Company UUID", required = true, in = ParameterIn.PATH),
+        @Parameter(name = "trace-id", description = "Trace ID for debugging", required = false, in = ParameterIn.HEADER)
+    }
+)
+@PostMapping(path = "/contractors/{ecid}/{company-uuid}")
+public ResponseEntity<String> createContractor(
+        @PathVariable("ecid") String ecid,
+        @PathVariable("company-uuid") String companyUuid,
+        @RequestHeader(value = "trace-id", required = false) String traceId) {
+    return ResponseEntity.ok("Contractor created");
+}
+@PostMapping(path = "/example")
+@Operation(summary = "Example endpoint", description = "Example description")
+public ResponseEntity<String> exampleEndpoint(
+        @RequestHeader(value = "authorization", required = true) String authorization,
+        @RequestHeader(value = "trace-id", required = false) String traceId,
+        @RequestParam(value = "queryParam", required = false) String queryParam) {
+    return ResponseEntity.ok("Success");
+}

@@ -1,0 +1,129 @@
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface PayeeRepository extends JpaRepository<PyrlPayeeEntity, Long> {
+
+    // Check if a company exists by company ID
+    @Query(value = "SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END " +
+                   "FROM pyrl_enrl WHERE related_entp_prty_id = :companyId", nativeQuery = true)
+    boolean existsByCompanyId(@Param("companyId") Long companyId);
+
+    // Find a payee by payee ID
+    @Query(value = "SELECT * FROM pyrl_payee WHERE payee_id = :payeeId", nativeQuery = true)
+    Optional<PyrlPayeeEntity> findByPayeeId(@Param("payeeId") Long payeeId);
+}
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Service
+public class PayeeService {
+
+    private final PayeeRepository payeeRepository;
+
+    public PayeeService(PayeeRepository payeeRepository) {
+        this.payeeRepository = payeeRepository;
+    }
+
+    @Transactional
+    public void saveOrUpdateEmployee(PayeeInformation request) {
+        validateRequest(request);
+
+        boolean isCompanyExists = payeeRepository.existsByCompanyId(request.getCompanyId());
+        if (!isCompanyExists) {
+            throw new BusinessException("Company ID not found in DB: " + request.getCompanyId());
+        }
+
+        Optional<PyrlPayeeEntity> existingPayee = payeeRepository.findByPayeeId(request.getPayeeId());
+        if (existingPayee.isPresent()) {
+            updateExistingPayee(existingPayee.get(), request);
+        } else {
+            insertNewPayee(request);
+        }
+    }
+
+    private void validateRequest(PayeeInformation request) {
+        if (request.getCompanyId() == null) {
+            throw new BusinessException("Company ID cannot be null.");
+        }
+        if (request.getPceEnrollmentId() == null) {
+            throw new BusinessException("PCE Enrollment ID cannot be null.");
+        }
+        if (request.getPayeeId() == null) {
+            throw new BusinessException("Payee ID cannot be null.");
+        }
+        if (request.getPayeeType() == null || request.getPayeeType().isBlank()) {
+            throw new BusinessException("Payee Type cannot be blank.");
+        }
+    }
+
+    private void updateExistingPayee(PyrlPayeeEntity payee, PayeeInformation request) {
+        payee.setFirstName(request.getFirstName());
+        payee.setLastName(request.getLastName());
+        payee.setPayeeType(request.getPayeeType());
+        payee.setUpdatedAt(LocalDateTime.now());
+        payeeRepository.save(payee);
+    }
+
+    private void insertNewPayee(PayeeInformation request) {
+        PyrlPayeeEntity newPayee = new PyrlPayeeEntity();
+        newPayee.setFirstName(request.getFirstName());
+        newPayee.setLastName(request.getLastName());
+        newPayee.setPayeeType(request.getPayeeType());
+        newPayee.setCreatedAt(LocalDateTime.now());
+        payeeRepository.save(newPayee);
+    }
+}
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+@SpringBootTest
+class PayeeRepositoryTest {
+
+    @Autowired
+    private PayeeRepository payeeRepository;
+
+    @Test
+    void testExistsByCompanyId() {
+        boolean exists = payeeRepository.existsByCompanyId(1L);
+        assertTrue(exists);
+    }
+}
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class PayeeServiceTest {
+
+    @Autowired
+    private PayeeService payeeService;
+
+    @Test
+    void testSaveOrUpdateEmployee() {
+        PayeeInformation request = new PayeeInformation();
+        request.setCompanyId(1L);
+        request.setPayeeId(1001L);
+        request.setFirstName("John");
+        request.setLastName("Doe");
+        request.setPayeeType("Employee");
+
+        payeeService.saveOrUpdateEmployee(request);
+    }
+}
+
+
+
+
+
+

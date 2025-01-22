@@ -17,10 +17,10 @@ public class OnboardingMapper {
         return payeeInfo;
     }
 }
-package net.jpmchase.payroll.product.controller;
+package net..payroll.product.controller;
 
-import net.jpmchase.payroll.product.model.PayeeOnboardingResponse;
-import net.jpmchase.payroll.product.service.EmployeeOnboardingStatusService;
+import net..payroll.product.model.PayeeOnboardingResponse;
+import net..payroll.product.service.EmployeeOnboardingStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -117,11 +117,11 @@ class EmployeeOnboardingStatusControllerTest {
     }
 }
 
-package net.jpmchase.payroll.product.controller;
+package net..payroll.product.controller;
 
-import net.jpmchase.payroll.product.model.PayeeOnboardingResponse;
-import net.jpmchase.payroll.product.model.PayeeOnboardingRequest;
-import net.jpmchase.payroll.product.service.EmployeeOnboardingStatusService;
+import net..payroll.product.model.PayeeOnboardingResponse;
+import net..payroll.product.model.PayeeOnboardingRequest;
+import net..payroll.product.service.EmployeeOnboardingStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -245,11 +245,11 @@ class ContractorOnboardingStatusControllerTest {
     }
 }
 
-package net.jpmchase.payroll.product.controller;
+package net..payroll.product.controller;
 
-import net.jpmchase.payroll.product.model.SendInviteRequest;
-import net.jpmchase.payroll.product.model.SendInviteResponse;
-import net.jpmchase.payroll.product.service.SendInviteService;
+import net..payroll.product.model.SendInviteRequest;
+import net..payroll.product.model.SendInviteResponse;
+import net..payroll.product.service.SendInviteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;

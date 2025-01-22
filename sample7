@@ -17,3 +17,327 @@ public class OnboardingMapper {
         return payeeInfo;
     }
 }
+package net.jpmchase.payroll.product.controller;
+
+import net.jpmchase.payroll.product.model.PayeeOnboardingResponse;
+import net.jpmchase.payroll.product.service.EmployeeOnboardingStatusService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.UUID;
+
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+
+class EmployeeOnboardingStatusControllerTest {
+
+    private MockMvc mockMvc;
+
+    @Mock
+    private EmployeeOnboardingStatusService onboardingStatusService;
+
+    @InjectMocks
+    private EmployeeOnboardingStatusController onboardingStatusController;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        mockMvc = MockMvcBuilders.standaloneSetup(onboardingStatusController).build();
+    }
+
+    @Test
+    void testAddOnboardingStatus() throws Exception {
+        UUID employeeId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Success");
+
+        // Mocking service call
+        when(onboardingStatusService.addOnboardingStatus(eq(employeeId), any(), eq(cibToken)))
+                .thenReturn(response);
+
+        String requestPayload = """
+            {
+                "onboardingStatus": "admin_onboarding_incomplete",
+                "additionalDetails": "Test Details"
+            }
+            """;
+
+        // Perform POST request
+        mockMvc.perform(post("/employees/{employee_id}/onboarding_status/add", employeeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("cibToken", cibToken)
+                        .content(requestPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("Success"));
+
+        // Verify service interaction
+        verify(onboardingStatusService, times(1)).addOnboardingStatus(eq(employeeId), any(), eq(cibToken));
+    }
+
+    @Test
+    void testUpdateOnboardingStatus() throws Exception {
+        UUID employeeId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Updated");
+
+        // Mocking service call
+        when(onboardingStatusService.updateOnboardingStatus(eq(employeeId), any(), eq(cibToken)))
+                .thenReturn(response);
+
+        String requestPayload = """
+            {
+                "onboardingStatus": "self_onboarding_completed",
+                "additionalDetails": "Update Test"
+            }
+            """;
+
+        // Perform PUT request
+        mockMvc.perform(put("/employees/{employee_id}/onboarding_status/update", employeeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("cibToken", cibToken)
+                        .content(requestPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("Updated"));
+
+        // Verify service interaction
+        verify(onboardingStatusService, times(1)).updateOnboardingStatus(eq(employeeId), any(), eq(cibToken));
+    }
+}
+
+package net.jpmchase.payroll.product.controller;
+
+import net.jpmchase.payroll.product.model.PayeeOnboardingResponse;
+import net.jpmchase.payroll.product.model.PayeeOnboardingRequest;
+import net.jpmchase.payroll.product.service.EmployeeOnboardingStatusService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.UUID;
+
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+class ContractorOnboardingStatusControllerTest {
+
+    private MockMvc mockMvc;
+
+    @Mock
+    private EmployeeOnboardingStatusService onboardingStatusService;
+
+    @InjectMocks
+    private ContractorOnboardingStatusController contractorOnboardingStatusController;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        mockMvc = MockMvcBuilders.standaloneSetup(contractorOnboardingStatusController).build();
+    }
+
+    @Test
+    void testGetOnboardingStatus() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Onboarding Pending");
+
+        // Mock service behavior
+        when(onboardingStatusService.getOnboardingStatus(contractorId, cibToken))
+                .thenReturn(response);
+
+        // Perform GET request
+        mockMvc.perform(get("/contractor/{contractor_id}/onboarding_status", contractorId)
+                        .header("cibToken", cibToken)
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("Onboarding Pending"));
+
+        // Verify service interaction
+        verify(onboardingStatusService, times(1)).getOnboardingStatus(contractorId, cibToken);
+    }
+
+    @Test
+    void testAddOnboardingStatus() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        PayeeOnboardingRequest request = new PayeeOnboardingRequest();
+        request.setOnboardingStatus("admin_onboarding_incomplete");
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Success");
+
+        // Mock service behavior
+        when(onboardingStatusService.addOnboardingStatus(eq(contractorId), any(), eq(cibToken)))
+                .thenReturn(response);
+
+        String requestPayload = """
+            {
+                "onboardingStatus": "admin_onboarding_incomplete",
+                "additionalDetails": "Test Contractor Details"
+            }
+            """;
+
+        // Perform POST request
+        mockMvc.perform(post("/contractor/{contractor_id}/onboarding_status/add", contractorId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("cibToken", cibToken)
+                        .content(requestPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("Success"));
+
+        // Verify service interaction
+        verify(onboardingStatusService, times(1)).addOnboardingStatus(eq(contractorId), any(), eq(cibToken));
+    }
+
+    @Test
+    void testUpdateOnboardingStatus() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        PayeeOnboardingRequest request = new PayeeOnboardingRequest();
+        request.setOnboardingStatus("self_onboarding_completed");
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Updated");
+
+        // Mock service behavior
+        when(onboardingStatusService.updateOnboardingStatus(eq(contractorId), any(), eq(cibToken)))
+                .thenReturn(response);
+
+        String requestPayload = """
+            {
+                "onboardingStatus": "self_onboarding_completed",
+                "additionalDetails": "Update Contractor Details"
+            }
+            """;
+
+        // Perform PUT request
+        mockMvc.perform(put("/contractor/{contractor_id}/onboarding_status/update", contractorId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("cibToken", cibToken)
+                        .content(requestPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("Updated"));
+
+        // Verify service interaction
+        verify(onboardingStatusService, times(1)).updateOnboardingStatus(eq(contractorId), any(), eq(cibToken));
+    }
+}
+
+package net.jpmchase.payroll.product.controller;
+
+import net.jpmchase.payroll.product.model.SendInviteRequest;
+import net.jpmchase.payroll.product.model.SendInviteResponse;
+import net.jpmchase.payroll.product.service.SendInviteService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.UUID;
+
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+class SendInviteControllerTest {
+
+    private MockMvc mockMvc;
+
+    @Mock
+    private SendInviteService sendInviteService;
+
+    @InjectMocks
+    private SendInviteController sendInviteController;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        mockMvc = MockMvcBuilders.standaloneSetup(sendInviteController).build();
+    }
+
+    @Test
+    void testSendInvite() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        SendInviteRequest request = new SendInviteRequest();
+        request.setMessage("Please complete your onboarding.");
+        request.setSubject("Onboarding Invitation");
+
+        SendInviteResponse response = new SendInviteResponse();
+        response.setStatus("Invitation Sent");
+
+        // Mock service behavior
+        when(sendInviteService.sendInvite(eq(contractorId), any(SendInviteRequest.class), eq(cibToken)))
+                .thenReturn(response);
+
+        String requestPayload = """
+            {
+                "subject": "Onboarding Invitation",
+                "message": "Please complete your onboarding."
+            }
+            """;
+
+        // Perform POST request
+        mockMvc.perform(post("/contractor/{contractor_id}/send_invite", contractorId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("cibToken", cibToken)
+                        .content(requestPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("Invitation Sent"));
+
+        // Verify service interaction
+        verify(sendInviteService, times(1)).sendInvite(eq(contractorId), any(SendInviteRequest.class), eq(cibToken));
+    }
+
+    @Test
+    void testSendInviteBadRequest() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String cibToken = "test-cib-token";
+
+        // Missing required fields in the request
+        String invalidRequestPayload = """
+            {
+                "subject": ""
+            }
+            """;
+
+        // Perform POST request with invalid payload
+        mockMvc.perform(post("/contractor/{contractor_id}/send_invite", contractorId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("cibToken", cibToken)
+                        .content(invalidRequestPayload))
+                .andExpect(status().isBadRequest());
+
+        // Verify that service was never called
+        verify(sendInviteService, never()).sendInvite(any(), any(), any());
+    }
+}
+
+

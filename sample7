@@ -339,5 +339,427 @@ class SendInviteControllerTest {
         verify(sendInviteService, never()).sendInvite(any(), any(), any());
     }
 }
+package net.jpmchase.payroll.product.service;
+
+import net.jpmchase.payroll.product.exception.BusinessException;
+import net.jpmchase.payroll.product.model.PayeeInformation;
+import net.jpmchase.payroll.product.model.PayeeOnboardingResponse;
+import net.jpmchase.payroll.product.remote.CibGustoProxyClient;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class ContractorOnboardingStatusServiceTest {
+
+    @Mock
+    private CibGustoProxyClient cibGustoProxyClient;
+
+    @Mock
+    private PayeeService payeeService;
+
+    @InjectMocks
+    private ContractorOnboardingStatusService contractorOnboardingStatusService;
+
+    private final String cibHost = "https://api.gusto-demo.com";
+    private final String cibVersion = "v1";
+    private final String contractorOnboardingStatusEndpoint = "/contractor/{contractor_id}/onboarding_status";
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void testGetOnboardingStatus() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String token = "test-cib-token";
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Onboarding Pending");
+
+        String endpoint = cibHost + "/" + cibVersion + contractorOnboardingStatusEndpoint.replace("{contractor_id}", contractorId.toString());
+
+        // Mocking behavior
+        when(cibGustoProxyClient.get(endpoint, token)).thenReturn("{\"status\": \"Onboarding Pending\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(PayeeOnboardingResponse.class))).thenReturn(response);
+
+        // Call the service method
+        PayeeOnboardingResponse result = contractorOnboardingStatusService.getOnboardingStatus(contractorId, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Onboarding Pending", result.getStatus());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).get(endpoint, token);
+    }
+
+    @Test
+    void testAddOnboardingStatus() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String token = "test-cib-token";
+        PayeeInformation payeeInformation = new PayeeInformation();
+        payeeInformation.setFirstName("John");
+        payeeInformation.setLastName("Doe");
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Success");
+
+        String endpoint = cibHost + "/" + cibVersion + contractorOnboardingStatusEndpoint.replace("{contractor_id}", contractorId.toString());
+
+        // Mocking behavior
+        doNothing().when(payeeService).saveOrUpdateEmployee(payeeInformation);
+        when(cibGustoProxyClient.post(endpoint, token, payeeInformation)).thenReturn("{\"status\": \"Success\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(PayeeOnboardingResponse.class))).thenReturn(response);
+
+        // Call the service method
+        PayeeOnboardingResponse result = contractorOnboardingStatusService.addOnboardingStatus(contractorId, payeeInformation, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Success", result.getStatus());
+
+        // Verify interactions
+        verify(payeeService, times(1)).saveOrUpdateEmployee(payeeInformation);
+        verify(cibGustoProxyClient, times(1)).post(endpoint, token, payeeInformation);
+    }
+
+    @Test
+    void testUpdateOnboardingStatus() throws Exception {
+        UUID contractorId = UUID.randomUUID();
+        String token = "test-cib-token";
+        PayeeInformation payeeInformation = new PayeeInformation();
+        payeeInformation.setFirstName("John");
+        payeeInformation.setLastName("Doe");
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Updated");
+
+        String endpoint = cibHost + "/" + cibVersion + contractorOnboardingStatusEndpoint.replace("{contractor_id}", contractorId.toString());
+
+        // Mocking behavior
+        when(cibGustoProxyClient.put(endpoint, token, payeeInformation)).thenReturn("{\"status\": \"Updated\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(PayeeOnboardingResponse.class))).thenReturn(response);
+
+        // Call the service method
+        PayeeOnboardingResponse result = contractorOnboardingStatusService.updateOnboardingStatus(contractorId, payeeInformation, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Updated", result.getStatus());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).put(endpoint, token, payeeInformation);
+    }
+
+    @Test
+    void testGetOnboardingStatus_Exception() {
+        UUID contractorId = UUID.randomUUID();
+        String token = "test-cib-token";
+
+        String endpoint = cibHost + "/" + cibVersion + contractorOnboardingStatusEndpoint.replace("{contractor_id}", contractorId.toString());
+
+        // Mock exception behavior
+        when(cibGustoProxyClient.get(endpoint, token)).thenThrow(new RuntimeException("Service unavailable"));
+
+        // Assertions
+        Exception exception = assertThrows(BusinessException.class, () ->
+                contractorOnboardingStatusService.getOnboardingStatus(contractorId, token));
+        assertEquals("Unable to get Contractor Onboarding Status from Gusto.", exception.getMessage());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).get(endpoint, token);
+    }
+}
+package net.jpmchase.payroll.product.service;
+
+import net.jpmchase.payroll.product.exception.BusinessException;
+import net.jpmchase.payroll.product.model.PayeeInformation;
+import net.jpmchase.payroll.product.model.PayeeOnboardingResponse;
+import net.jpmchase.payroll.product.remote.CibGustoProxyClient;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class EmployeeOnboardingStatusServiceTest {
+
+    @Mock
+    private CibGustoProxyClient cibGustoProxyClient;
+
+    @Mock
+    private PayeeService payeeService;
+
+    @InjectMocks
+    private EmployeeOnboardingStatusService employeeOnboardingStatusService;
+
+    private final String cibHost = "https://api.gusto-demo.com";
+    private final String cibVersion = "v1";
+    private final String employeeOnboardingStatusEndpoint = "/employees/{employee_id}/onboarding_status";
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void testGetOnboardingStatus() throws Exception {
+        UUID employeeId = UUID.randomUUID();
+        String token = "test-cib-token";
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Onboarding Pending");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeOnboardingStatusEndpoint.replace("{employee_id}", employeeId.toString());
+
+        // Mocking behavior
+        when(cibGustoProxyClient.get(endpoint, token)).thenReturn("{\"status\": \"Onboarding Pending\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(PayeeOnboardingResponse.class))).thenReturn(response);
+
+        // Call the service method
+        PayeeOnboardingResponse result = employeeOnboardingStatusService.getOnboardingStatus(employeeId.toString(), token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Onboarding Pending", result.getStatus());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).get(endpoint, token);
+    }
+
+    @Test
+    void testAddOnboardingStatus() throws Exception {
+        UUID employeeId = UUID.randomUUID();
+        String token = "test-cib-token";
+        PayeeInformation payeeInformation = new PayeeInformation();
+        payeeInformation.setFirstName("John");
+        payeeInformation.setLastName("Doe");
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Success");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeOnboardingStatusEndpoint.replace("{employee_id}", employeeId.toString());
+
+        // Mocking behavior
+        doNothing().when(payeeService).saveOrUpdateEmployee(payeeInformation);
+        when(cibGustoProxyClient.post(endpoint, token, payeeInformation)).thenReturn("{\"status\": \"Success\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(PayeeOnboardingResponse.class))).thenReturn(response);
+
+        // Call the service method
+        PayeeOnboardingResponse result = employeeOnboardingStatusService.addOnboardingStatus(employeeId, payeeInformation, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Success", result.getStatus());
+
+        // Verify interactions
+        verify(payeeService, times(1)).saveOrUpdateEmployee(payeeInformation);
+        verify(cibGustoProxyClient, times(1)).post(endpoint, token, payeeInformation);
+    }
+
+    @Test
+    void testUpdateOnboardingStatus() throws Exception {
+        UUID employeeId = UUID.randomUUID();
+        String token = "test-cib-token";
+        PayeeInformation payeeInformation = new PayeeInformation();
+        payeeInformation.setFirstName("John");
+        payeeInformation.setLastName("Doe");
+
+        PayeeOnboardingResponse response = new PayeeOnboardingResponse();
+        response.setStatus("Updated");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeOnboardingStatusEndpoint.replace("{employee_id}", employeeId.toString());
+
+        // Mocking behavior
+        when(cibGustoProxyClient.put(endpoint, token, payeeInformation)).thenReturn("{\"status\": \"Updated\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(PayeeOnboardingResponse.class))).thenReturn(response);
+
+        // Call the service method
+        PayeeOnboardingResponse result = employeeOnboardingStatusService.updateOnboardingStatus(employeeId, payeeInformation, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Updated", result.getStatus());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).put(endpoint, token, payeeInformation);
+    }
+
+    @Test
+    void testGetOnboardingStatus_Exception() {
+        UUID employeeId = UUID.randomUUID();
+        String token = "test-cib-token";
+
+        String endpoint = cibHost + "/" + cibVersion + employeeOnboardingStatusEndpoint.replace("{employee_id}", employeeId.toString());
+
+        // Mock exception behavior
+        when(cibGustoProxyClient.get(endpoint, token)).thenThrow(new RuntimeException("Service unavailable"));
+
+        // Assertions
+        Exception exception = assertThrows(BusinessException.class, () ->
+                employeeOnboardingStatusService.getOnboardingStatus(employeeId.toString(), token));
+        assertEquals("Unable to get Employee Onboarding Status from Gusto.", exception.getMessage());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).get(endpoint, token);
+    }
+}
+package net.jpmchase.payroll.product.service;
+
+import net.jpmchase.payroll.product.exception.BusinessException;
+import net.jpmchase.payroll.product.model.EmployeeSendInviteRequest;
+import net.jpmchase.payroll.product.model.EmployeeSendInviteResponse;
+import net.jpmchase.payroll.product.remote.CibGustoProxyClient;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class EmployeeSendInviteServiceTest {
+
+    @Mock
+    private CibGustoProxyClient cibGustoProxyClient;
+
+    @InjectMocks
+    private EmployeeSendInviteService employeeSendInviteService;
+
+    private final String cibHost = "https://api.gusto-demo.com";
+    private final String cibVersion = "v1";
+    private final String employeeSendInviteEndpoint = "/employees/{employee_id}/send_invite";
+    private final String employeeCancelInviteEndpoint = "/employees/{employee_id}/cancel_invite";
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void testSendInviteToEmployee() throws Exception {
+        String employeeId = "employee-123";
+        String token = "test-cib-token";
+
+        EmployeeSendInviteRequest request = new EmployeeSendInviteRequest();
+        request.setMessage("Please complete your onboarding.");
+        request.setSubject("Onboarding Invitation");
+
+        EmployeeSendInviteResponse response = new EmployeeSendInviteResponse();
+        response.setStatus("Success");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeSendInviteEndpoint.replace("{employee_id}", employeeId);
+
+        // Mocking behavior
+        when(cibGustoProxyClient.post(endpoint, token, request))
+                .thenReturn("{\"status\": \"Success\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(EmployeeSendInviteResponse.class)))
+                .thenReturn(response);
+
+        // Call the service method
+        EmployeeSendInviteResponse result = employeeSendInviteService.sendInviteToEmployee(employeeId, request, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Success", result.getStatus());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).post(endpoint, token, request);
+    }
+
+    @Test
+    void testCancelInviteForEmployeeToSelfOnboard() throws Exception {
+        String employeeId = "employee-123";
+        String token = "test-cib-token";
+
+        EmployeeSendInviteRequest request = new EmployeeSendInviteRequest();
+        request.setMessage("Cancel onboarding invite.");
+
+        EmployeeSendInviteResponse response = new EmployeeSendInviteResponse();
+        response.setStatus("Invite Canceled");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeCancelInviteEndpoint.replace("{employee_id}", employeeId);
+
+        // Mocking behavior
+        when(cibGustoProxyClient.delete(endpoint, token, request))
+                .thenReturn("{\"status\": \"Invite Canceled\"}");
+        when(cibGustoProxyClient.readValue(anyString(), eq(EmployeeSendInviteResponse.class)))
+                .thenReturn(response);
+
+        // Call the service method
+        EmployeeSendInviteResponse result = employeeSendInviteService.cancelInviteForEmployeeToSelfOnboard(employeeId, request, token);
+
+        // Assertions
+        assertNotNull(result);
+        assertEquals("Invite Canceled", result.getStatus());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).delete(endpoint, token, request);
+    }
+
+    @Test
+    void testSendInviteToEmployee_Exception() {
+        String employeeId = "employee-123";
+        String token = "test-cib-token";
+
+        EmployeeSendInviteRequest request = new EmployeeSendInviteRequest();
+        request.setMessage("Please complete your onboarding.");
+        request.setSubject("Onboarding Invitation");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeSendInviteEndpoint.replace("{employee_id}", employeeId);
+
+        // Mocking exception
+        when(cibGustoProxyClient.post(endpoint, token, request))
+                .thenThrow(new RuntimeException("Service unavailable"));
+
+        // Assertions
+        Exception exception = assertThrows(BusinessException.class, () ->
+                employeeSendInviteService.sendInviteToEmployee(employeeId, request, token));
+        assertEquals("Unable to send invite to employee for onboarding.", exception.getMessage());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).post(endpoint, token, request);
+    }
+
+    @Test
+    void testCancelInviteForEmployeeToSelfOnboard_Exception() {
+        String employeeId = "employee-123";
+        String token = "test-cib-token";
+
+        EmployeeSendInviteRequest request = new EmployeeSendInviteRequest();
+        request.setMessage("Cancel onboarding invite.");
+
+        String endpoint = cibHost + "/" + cibVersion + employeeCancelInviteEndpoint.replace("{employee_id}", employeeId);
+
+        // Mocking exception
+        when(cibGustoProxyClient.delete(endpoint, token, request))
+                .thenThrow(new RuntimeException("Service unavailable"));
+
+        // Assertions
+        Exception exception = assertThrows(BusinessException.class, () ->
+                employeeSendInviteService.cancelInviteForEmployeeToSelfOnboard(employeeId, request, token));
+        assertEquals("Unable to cancel onboarding invite to employee.", exception.getMessage());
+
+        // Verify interactions
+        verify(cibGustoProxyClient, times(1)).delete(endpoint, token, request);
+    }
+}
+
+
+
 
 

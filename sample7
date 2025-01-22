@@ -1,0 +1,19 @@
+
+
+import net.jpmchase.payroll.product.model.EmployeeOnboardingRequest;
+import net.jpmchase.payroll.product.model.PayeeInformation;
+
+public class OnboardingMapper {
+
+    public static PayeeInformation toPayeeInformation(EmployeeOnboardingRequest request) {
+        PayeeInformation payeeInfo = new PayeeInformation();
+        payeeInfo.setFirstName(request.getFirstName());
+        payeeInfo.setLastName(request.getLastName());
+        payeeInfo.setPayeeType(request.getPayeeType());
+        payeeInfo.setEmail(request.getEmail());
+        payeeInfo.setPhoneNumber(request.getPhoneNumber());
+        payeeInfo.setAddress(request.getAddress());
+        // Map other fields as necessary
+        return payeeInfo;
+    }
+}

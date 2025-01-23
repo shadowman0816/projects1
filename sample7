@@ -783,5 +783,63 @@ spring.datasource.password=password
 spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
 spring.jpa.hibernate.ddl-auto=create
 
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
+@ApiResponses({
+    @ApiResponse(responseCode = "201", description = "Successful Response"),
+    @ApiResponse(responseCode = "400", description = "The request is missing a required parameter, or is invalid."),
+    @ApiResponse(responseCode = "401", description = "The access token is expired, revoked, malformed, or invalid."),
+    @ApiResponse(responseCode = "404", description = "The requested resource does not exist. Make sure the parameters are correct."),
+    @ApiResponse(responseCode = "422", description = "Unprocessable Entity"),
+    @ApiResponse(responseCode = "500", description = "System exception")
+})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Target({ElementType.METHOD, ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+@ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Request processed successfully"),
+        @ApiResponse(responseCode = "400", description = "Bad Request"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "404", description = "Resource not found"),
+        @ApiResponse(responseCode = "422", description = "Unprocessable Entity"),
+        @ApiResponse(responseCode = "500", description = "Internal Server Error")
+})
+public @interface CommonApiResponse {
+}import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.responses.ApiResponse;
+import io.swagger.v3.oas.models.responses.ApiResponses;
+import org.springdoc.core.customizers.OpenApiCustomizer;
+import org.springframework.stereotype.Component;
+
+@Component
+public class CommonApiResponseCustomizer implements OpenApiCustomizer {
+
+    @Override
+    public void customise(io.swagger.v3.oas.models.OpenAPI openApi) {
+        openApi.getPaths().values().forEach(pathItem -> pathItem.readOperations().forEach(operation -> {
+            ApiResponses responses = operation.getResponses();
+
+            responses.addApiResponse("200", new ApiResponse().description("Request processed successfully"));
+            responses.addApiResponse("400", new ApiResponse().description("Bad Request"));
+            responses.addApiResponse("401", new ApiResponse().description("Unauthorized"));
+            responses.addApiResponse("404", new ApiResponse().description("Resource not found"));
+            responses.addApiResponse("422", new ApiResponse().description("Unprocessable Entity"));
+            responses.addApiResponse("500", new ApiResponse().description("Internal Server Error"));
+        }));
+    }
+}
+
+
 
 

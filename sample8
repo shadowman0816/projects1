@@ -21,3 +21,77 @@ private void addCommonResponses(Operation operation) {
         }
     }
 }
+@Component
+public class SwaggerApiResponseConfig implements OpenApiCustomiser {
+
+    @Override
+    public void customise(OpenAPI openApi) {
+        openApi.getPaths().values().forEach(pathItem -> {
+            pathItem.readOperations().forEach(operation -> {
+                ApiResponses responses = operation.getResponses();
+
+                // Process tags like 200=SuccessResponse, 401=UnauthorizedError
+                operation.getTags().forEach(tag -> {
+                    if (tag.matches("\\d{3}=.+")) { // Match format like 200=ClassName
+                        processTag(responses, tag);
+                    } else {
+                        addDefaultResponse(responses, tag); // Handle standard error codes
+                    }
+                });
+            });
+        });
+    }
+
+    private void processTag(ApiResponses responses, String tag) {
+        // Extract status code and class name from the tag (e.g., 200=SuccessResponse)
+        String[] parts = tag.split("=");
+        String statusCode = parts[0]; // Extract status code (e.g., "200")
+        String className = parts[1];  // Extract class name (e.g., "SuccessResponse")
+
+        // Add API response dynamically
+        addApiResponse(responses, statusCode, "Custom Response", className);
+    }
+
+    private void addDefaultResponse(ApiResponses responses, String tag) {
+        // Handle tags without a specific class name (e.g., "400", "500")
+        String description;
+        switch (tag) {
+            case "400":
+                description = "Bad Request";
+                break;
+            case "401":
+                description = "Unauthorized";
+                break;
+            case "422":
+                description = "Unprocessable Entity";
+                break;
+            case "500":
+                description = "Internal Server Error";
+                break;
+            default:
+                description = "Unexpected Error";
+        }
+
+        ApiResponse apiResponse = new ApiResponse().description(description);
+        responses.addApiResponse(tag, apiResponse);
+    }
+
+    private void addApiResponse(ApiResponses responses, String statusCode, String description, String className) {
+        ApiResponse apiResponse = new ApiResponse().description(description);
+
+        if (className != null) {
+            try {
+                Class<?> clazz = Class.forName("net.jpmchase.payroll.product.model." + className);
+                Content content = new Content();
+                Schema<?> schema = new Schema<>();
+                schema.set$ref("#/components/schemas/" + clazz.getSimpleName());
+                content.addMediaType(org.springframework.http.MediaType.APPLICATION_JSON_VALUE, new MediaType().schema(schema));
+                apiResponse.setContent(content);
+            } catch (ClassNotFoundException e) {
+                throw new RuntimeException("Class not found: " + className, e);
+            }
+        }
+
+        responses.addApiResponse(statusCode, apiResponse);
+    }
+}

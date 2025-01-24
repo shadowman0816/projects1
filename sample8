@@ -1,0 +1,23 @@
+private void addCommonResponses(Operation operation) {
+    ApiResponses responses = operation.getResponses();
+
+    if (operation.getTags() != null) {
+        for (String tag : operation.getTags()) {
+            if (tag.startsWith("use200")) {
+                String[] parts = tag.split(":");
+                String description = parts.length > 2 ? parts[2] : "Successful response";
+                Class<?> contentClass = null;
+
+                try {
+                    if (parts.length > 1) {
+                        contentClass = Class.forName("com.example.models." + parts[1]);
+                    }
+                } catch (ClassNotFoundException e) {
+                    e.printStackTrace();
+                }
+
+                responses.addApiResponse("200", createApiResponse(description, contentClass));
+            }
+        }
+    }
+}

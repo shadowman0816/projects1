@@ -23,3 +23,17 @@ public enum ResponseModel {
         throw new IllegalArgumentException("No mapping found for class: " + simpleName);
     }
 }
+
+responseExtensions.forEach((statusCode, responseDetail) -> {
+    if (!statusCode.equals("DefaultApiResponses")) {
+        String className = (String) responseDetail; // Only the simple name is provided
+        String description = "Successful Response";
+
+        // Resolve the fully qualified name using the enum
+        String fullyQualifiedName = ResponseModel.getFullyQualifiedName(className);
+
+        // Add the API response with the resolved class name
+        addApiResponse(responses, statusCode, description, fullyQualifiedName);
+    }
+});
+ 

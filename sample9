@@ -37,3 +37,28 @@ responseExtensions.forEach((statusCode, responseDetail) -> {
     }
 });
  
+@Component
+public class SwaggerSchemaConfig implements OpenAPICustomizer {
+    @Override
+    public void customise(OpenAPI openAPI) {
+        Components components = openAPI.getComponents();
+
+        // Add GustoErrorResponse schema
+        Schema gustoErrorResponse = new Schema<>()
+            .type("object")
+            .addProperties("errors", new ArraySchema().items(
+                new Schema<>()
+                    .type("object")
+                    .addProperties("errorKey", new StringSchema())
+                    .addProperties("category", new StringSchema())
+                    .addProperties("message", new StringSchema())
+                    .addProperties("metadata", new Schema<>()
+                        .type("object")
+                        .addProperties("key", new StringSchema())
+                    )
+            ));
+        components.addSchemas("GustoErrorResponse", gustoErrorResponse);
+
+        openAPI.setComponents(components);
+    }
+}

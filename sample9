@@ -1,0 +1,25 @@
+public enum ResponseModel {
+    EMPLOYEE_RESPONSE("EmployeeResponse", "net.jpmchase.payroll.product.model.gusto.Employee.EmployeeResponse"),
+    CONTRACTOR_RESPONSE("ContractorResponse", "net.jpmchase.payroll.product.model.gusto.Contractor.ContractorResponse");
+
+    private final String simpleName;
+    private final String fullyQualifiedName;
+
+    ResponseModel(String simpleName, String fullyQualifiedName) {
+        this.simpleName = simpleName;
+        this.fullyQualifiedName = fullyQualifiedName;
+    }
+
+    public String getFullyQualifiedName() {
+        return fullyQualifiedName;
+    }
+
+    public static String getFullyQualifiedName(String simpleName) {
+        for (ResponseModel model : values()) {
+            if (model.simpleName.equals(simpleName)) {
+                return model.fullyQualifiedName;
+            }
+        }
+        throw new IllegalArgumentException("No mapping found for class: " + simpleName);
+    }
+}

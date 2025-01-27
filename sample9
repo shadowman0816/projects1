@@ -62,3 +62,24 @@ public class SwaggerSchemaConfig implements OpenAPICustomizer {
         openAPI.setComponents(components);
     }
 }
+
+@Component
+public class GustoErrorSchemaCustomizer implements OpenAPICustomizer {
+
+    @Override
+    public void customise(OpenAPI openAPI) {
+        Components components = openAPI.getComponents();
+
+        Schema gustoErrorSchema = new Schema<>()
+            .type("object")
+            .addProperties("error_key", new StringSchema().description("A unique key for identifying the error").example("error_key"))
+            .addProperties("category", new StringSchema().description("Specifies the type of error").example("invalid_request"))
+            .addProperties("message", new StringSchema().description("Details about the error").example("Invalid input data"))
+            .addProperties("metadata", new Schema<>().type("object").additionalProperties(new StringSchema()))
+            .addProperties("errors", new ArraySchema().items(new Schema<>().$ref("#/components/schemas/GustoError")));
+
+        components.addSchemas("GustoErrorResponse", gustoErrorSchema);
+
+        openAPI.setComponents(components);
+    }
+}

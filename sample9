@@ -1,0 +1,179 @@
+package com.net.jpmchase.payroll.product.eventmanager;
+
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * EventManager - Listens to cross-account SQS queues, validates messages, logs events, and routes them based on event type.
+ */
+@Service
+public class EventManager {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(EventManager.class);
+
+    private final SqsClient sqsClient;
+    private final ObjectMapper objectMapper;
+    private final String priorityQueueUrl;
+    private final String nonPriorityQueueUrl;
+    private final String deadLetterQueueUrl;
+    private final InternalQueueService internalQueueService;
+    private final ExternalService externalService;
+    private final ExecutorService executorService;
+    private final int maxRetries = 3;
+
+    public EventManager(SqsClient sqsClient, 
+                        String priorityQueueUrl, 
+                        String nonPriorityQueueUrl, 
+                        String deadLetterQueueUrl, 
+                        InternalQueueService internalQueueService, 
+                        ExternalService externalService) {
+        this.sqsClient = sqsClient;
+        this.objectMapper = new ObjectMapper();
+        this.priorityQueueUrl = priorityQueueUrl;
+        this.nonPriorityQueueUrl = nonPriorityQueueUrl;
+        this.deadLetterQueueUrl = deadLetterQueueUrl;
+        this.internalQueueService = internalQueueService;
+        this.externalService = externalService;
+        this.executorService = Executors.newFixedThreadPool(2); // Two threads for two queues
+    }
+
+    public void listenToQueues() {
+        // Listen to both priority and non-priority queues using ExecutorService
+        executorService.submit(() -> pollQueue(priorityQueueUrl, "priority"));
+        executorService.submit(() -> pollQueue(nonPriorityQueueUrl, "non-priority"));
+    }
+
+    private void pollQueue(String queueUrl, String queueType) {
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                        .queueUrl(queueUrl)
+                        .maxNumberOfMessages(10)
+                        .waitTimeSeconds(10)
+                        .build();
+                ReceiveMessageResponse response = sqsClient.receiveMessage(request);
+
+                List<Message> messages = response.messages();
+                for (Message message : messages) {
+                    processMessageWithRetry(message, queueType);
+                }
+            } catch (Exception e) {
+                LOGGER.error("Error while polling {} queue", queueType, e);
+            }
+        }
+    }
+
+    private void processMessageWithRetry(Message message, String queueType) {
+        AtomicInteger retryCount = new AtomicInteger(0);
+
+        while (retryCount.get() < maxRetries) {
+            try {
+                processMessage(message, queueType);
+                return; // Exit loop if processing is successful
+            } catch (Exception e) {
+                retryCount.incrementAndGet();
+                LOGGER.warn("Retry {}/{} for message: {}", retryCount.get(), maxRetries, message.body(), e);
+
+                if (retryCount.get() >= maxRetries) {
+                    moveToDeadLetterQueue(message, "Exceeded max retries");
+                    break;
+                }
+            }
+        }
+    }
+
+    private void processMessage(Message message, String queueType) throws Exception {
+        LOGGER.info("Received message from {} queue: {}", queueType, message.body());
+
+        // Parse and validate the message
+        Event event = objectMapper.readValue(message.body(), Event.class);
+        if (validateEvent(event)) {
+            LOGGER.info("Validation successful for event: {}", event);
+
+            // Route based on event type
+            routeEvent(event);
+
+            // Delete the message from the queue
+            deleteMessage(message, queueType);
+        } else {
+            LOGGER.warn("Validation failed for event: {}", event);
+            throw new RuntimeException("Validation failed");
+        }
+    }
+
+    private boolean validateEvent(Event event) {
+        // Add validation logic here (e.g., check required fields, data integrity)
+        return event != null && event.getEventType() != null && !event.getEventType().isEmpty();
+    }
+
+    private void routeEvent(Event event) {
+        try {
+            switch (event.getEventType()) {
+                case "INTERNAL_QUEUE":
+                    LOGGER.info("Routing event to internal queue: {}", event);
+                    internalQueueService.publishToInternalQueue(event);
+                    break;
+
+                case "EXTERNAL_SERVICE":
+                    LOGGER.info("Routing event to external service: {}", event);
+                    externalService.processEvent(event);
+                    break;
+
+                default:
+                    LOGGER.warn("Unknown event type: {}, ignoring event: {}", event.getEventType(), event);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error routing event: {}", event, e);
+            throw new RuntimeException("Error routing event", e);
+        }
+    }
+
+    private void deleteMessage(Message message, String queueType) {
+        try {
+            DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                    .queueUrl(queueType.equals("priority") ? priorityQueueUrl : nonPriorityQueueUrl)
+                    .receiptHandle(message.receiptHandle())
+                    .build();
+            sqsClient.deleteMessage(deleteRequest);
+            LOGGER.info("Message deleted successfully from {} queue: {}", queueType, message.messageId());
+        } catch (Exception e) {
+            LOGGER.error("Error deleting message from {} queue: {}", queueType, message.messageId(), e);
+        }
+    }
+
+    private void moveToDeadLetterQueue(Message message, String errorReason) {
+        try {
+            LOGGER.info("Moving message to dead letter queue. Reason: {}. Message: {}", errorReason, message.body());
+            SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
+                    .queueUrl(deadLetterQueueUrl)
+                    .messageBody(message.body())
+                    .messageAttributes(message.messageAttributes())
+                    .build();
+            sqsClient.sendMessage(sendMessageRequest);
+        } catch (Exception e) {
+            LOGGER.error("Failed to move message to dead letter queue: {}", message.body(), e);
+        }
+    }
+
+    public void shutdown() {
+        try {
+            executorService.shutdown();
+            if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOGGER.error("Error shutting down ExecutorService", e);
+            executorService.shutdownNow();
+        }
+    }
+}

@@ -746,7 +746,54 @@ public class PyrlPayeeAcctAudit {
     private String updtUsrId;
 }
 
+import jakarta.persistence.*;
+import lombok.*;
 
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "pyrl_enrl_prfl")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class PyrlEnrlPrfl {
+
+    @Id
+    @Column(name = "pyrl_enrl_id", length = 100, nullable = false)
+    private String pyrlEnrlId;
+
+    @Column(name = "actor_entp_prty_id", length = 10, nullable = false)
+    private String actorEntpPrtyId;
+
+    @Column(name = "prty_role_type_cd", length = 4, nullable = false)
+    private String prtyRoleTypeCd;
+
+    @Column(name = "ol_prfl_id")
+    private Long olPrflId;
+
+    @Column(name = "seg_cd")
+    private Short segCd;
+
+    @Column(name = "cre_ts", nullable = false, updatable = false)
+    private LocalDateTime creTs;
+
+    @Column(name = "cre_usr_id", length = 32, nullable = false)
+    private String creUsrId;
+
+    @Column(name = "updt_ts")
+    private LocalDateTime updtTs;
+
+    @Column(name = "updt_usr_id", length = 32)
+    private String updtUsrId;
+
+    @Column(name = "actv_rcrd_in")
+    private Boolean actvRcrdIn;
+
+    @Column(name = "prty_to_prty_role_type_cd", length = 4)
+    private String prtyToPrtyRoleTypeCd;
+}
 
 
 

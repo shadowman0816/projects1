@@ -1,0 +1,148 @@
+@Component
+public class InternalQueueListener {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(InternalQueueListener.class);
+    private final SqsClient sqsClient;
+    private final ProcessorService processorService;
+    private final AwsSqsConfig awsSqsConfig;
+
+    @Autowired
+    public InternalQueueListener(SqsClient sqsClient, ProcessorService processorService, AwsSqsConfig awsSqsConfig) {
+        this.sqsClient = sqsClient;
+        this.processorService = processorService;
+        this.awsSqsConfig = awsSqsConfig;
+    }
+
+    @Scheduled(fixedDelay = 5000)
+    public void listenToInternalQueue() {
+        try {
+            processQueue(awsSqsConfig.getInternalQueueUrl());
+        } catch (Exception e) {
+            LOGGER.error("ERR_INTERNAL_QUEUE_LISTENER | Reason=Failed to listen to internal queue | Details={}", e.getMessage());
+        }
+    }
+
+    private void processQueue(String queueUrl) {
+        ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .maxNumberOfMessages(10)
+                .waitTimeSeconds(10)
+                .build();
+
+        ReceiveMessageResponse response = sqsClient.receiveMessage(request);
+
+        for (Message message : response.messages()) {
+            try {
+                processorService.processMessage(message.body());
+                deleteMessage(message, queueUrl);
+            } catch (Exception e) {
+                LOGGER.error("ERR_INTERNAL_QUEUE_PROCESSING | MessageID={} | Reason={}", message.messageId(), e.getMessage());
+            }
+        }
+    }
+
+    private void deleteMessage(Message message, String queueUrl) {
+        try {
+            sqsClient.deleteMessage(DeleteMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .receiptHandle(message.receiptHandle())
+                    .build());
+        } catch (Exception e) {
+            LOGGER.error("ERR_INTERNAL_QUEUE_DELETE | MessageID={} | Reason=Failed to delete message from internal queue", message.messageId());
+        }
+    }
+}
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@Service
+public class ProcessorService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProcessorService.class);
+    private final ProcessorRegistry processorRegistry;
+    private final ObjectMapper objectMapper;
+
+    public ProcessorService(ProcessorRegistry processorRegistry) {
+        this.processorRegistry = processorRegistry;
+        this.objectMapper = new ObjectMapper();
+    }
+
+    public void processMessage(String payload) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(payload);
+            String eventType = rootNode.get("eventType").asText();
+            LOGGER.info("Processing message | EventType={} | Payload={}", eventType, payload);
+
+            // Fetch the appropriate processor
+            EventProcessor processor = processorRegistry.getProcessorForEvent(eventType);
+            processor.process(rootNode);
+
+        } catch (Exception e) {
+            LOGGER.error("ERR_PROCESSOR_FAILURE | Reason=Failed to process message | Payload={} | Error={}", payload, e.getMessage());
+        }
+    }
+}
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Service
+public class ProcessorRegistry {
+
+    private final Map<String, EventProcessor> processorMap = new HashMap<>();
+
+    @Autowired
+    public ProcessorRegistry(BankAccountProcessor bankAccountProcessor, CompanyProcessor companyProcessor,
+                             EmployeeProcessor employeeProcessor, PayrollProcessor payrollProcessor,
+                             DefaultProcessor defaultProcessor) {
+        processorMap.put("bank_account.created", bankAccountProcessor);
+        processorMap.put("bank_account.updated", bankAccountProcessor);
+        processorMap.put("company.created", companyProcessor);
+        processorMap.put("company.updated", companyProcessor);
+        processorMap.put("employee.created", employeeProcessor);
+        processorMap.put("employee.terminated", employeeProcessor);
+        processorMap.put("payroll.processed", payrollProcessor);
+
+        // Default processor for unrecognized event types
+        processorMap.put("default", defaultProcessor);
+    }
+
+    public EventProcessor getProcessorForEvent(String eventType) {
+        return processorMap.getOrDefault(eventType, processorMap.get("default"));
+    }
+}
+
+import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+@Service
+public class BankAccountProcessor implements EventProcessor {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BankAccountProcessor.class);
+
+    @Override
+    public void process(JsonNode eventData) {
+        LOGGER.info("Processing Bank Account Event | Data={}", eventData);
+        // Implement specific logic for bank account processing
+    }
+}
+
+import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+@Service
+public class CompanyProcessor implements EventProcessor {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CompanyProcessor.class);
+
+    @Override
+    public void process(JsonNode eventData) {
+        LOGGER.info("Processing Company Event | Data={}", eventData);
+        // Implement specific logic for company processing
+    }
+}

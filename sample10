@@ -1,0 +1,405 @@
+@Configuration
+public class AwsSqsConfig {
+    
+    @Value("${aws.sqs.priority.queue.url}")
+    private String priorityQueueUrl;
+
+    @Value("${aws.sqs.nonpriority.queue.url}")
+    private String nonPriorityQueueUrl;
+
+    @Value("${aws.sqs.deadletter.queue.url}")
+    private String deadLetterQueueUrl;
+
+    @Bean
+    public SqsClient sqsClient() {
+        return SqsClient.builder()
+                .region(Region.of("us-east-1"))
+                .build();
+    }
+
+    public String getPriorityQueueUrl() {
+        return priorityQueueUrl;
+    }
+
+    public String getNonPriorityQueueUrl() {
+        return nonPriorityQueueUrl;
+    }
+
+    public String getDeadLetterQueueUrl() {
+        return deadLetterQueueUrl;
+    }
+}
+
+@Service
+public class PriorityQueueListener {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(PriorityQueueListener.class);
+    private final SqsClient sqsClient;
+    private final EventProcessorService eventProcessorService;
+    private final AwsSqsConfig awsSqsConfig;
+
+    public PriorityQueueListener(SqsClient sqsClient, EventProcessorService eventProcessorService, AwsSqsConfig awsSqsConfig) {
+        this.sqsClient = sqsClient;
+        this.eventProcessorService = eventProcessorService;
+        this.awsSqsConfig = awsSqsConfig;
+    }
+
+    @Scheduled(fixedDelay = 5000) // Runs every 5 seconds
+    public void listenToPriorityQueue() {
+        processQueue(awsSqsConfig.getPriorityQueueUrl(), "priority");
+    }
+
+    private void processQueue(String queueUrl, String queueType) {
+        ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .maxNumberOfMessages(10)
+                .waitTimeSeconds(10)
+                .build();
+
+        ReceiveMessageResponse response = sqsClient.receiveMessage(request);
+
+        for (Message message : response.messages()) {
+            try {
+                eventProcessorService.processMessage(message, queueType);
+                deleteMessage(message, queueUrl);
+            } catch (Exception e) {
+                LOGGER.error("Error processing message: {}", message.body(), e);
+            }
+        }
+    }
+
+    private void deleteMessage(Message message, String queueUrl) {
+        sqsClient.deleteMessage(DeleteMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .receiptHandle(message.receiptHandle())
+                .build());
+    }
+}
+
+
+@Service
+public class NonPriorityQueueListener {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(NonPriorityQueueListener.class);
+    private final SqsClient sqsClient;
+    private final EventProcessorService eventProcessorService;
+    private final AwsSqsConfig awsSqsConfig;
+
+    public NonPriorityQueueListener(SqsClient sqsClient, EventProcessorService eventProcessorService, AwsSqsConfig awsSqsConfig) {
+        this.sqsClient = sqsClient;
+        this.eventProcessorService = eventProcessorService;
+        this.awsSqsConfig = awsSqsConfig;
+    }
+
+    @Scheduled(fixedDelay = 5000) // Runs every 5 seconds
+    public void listenToNonPriorityQueue() {
+        processQueue(awsSqsConfig.getNonPriorityQueueUrl(), "non-priority");
+    }
+
+    private void processQueue(String queueUrl, String queueType) {
+        ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .maxNumberOfMessages(10)
+                .waitTimeSeconds(10)
+                .build();
+
+        ReceiveMessageResponse response = sqsClient.receiveMessage(request);
+
+        for (Message message : response.messages()) {
+            try {
+                eventProcessorService.processMessage(message, queueType);
+                deleteMessage(message, queueUrl);
+            } catch (Exception e) {
+                LOGGER.error("Error processing message: {}", message.body(), e);
+            }
+        }
+    }
+
+    private void deleteMessage(Message message, String queueUrl) {
+        sqsClient.deleteMessage(DeleteMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .receiptHandle(message.receiptHandle())
+                .build());
+    }
+}
+
+@SpringBootApplication
+@EnableScheduling
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+import java.util.*;
+
+@Service
+public class EventRegistry {
+
+    private final Map<String, List<String>> eventToUuidMap = new HashMap<>();
+
+    @Autowired
+    public EventRegistry() {
+        // Define which UUIDs must be validated per event type
+        eventToUuidMap.put("bank_account.created", Arrays.asList("companyId", "bankAccountId"));
+        eventToUuidMap.put("bank_account.updated", Arrays.asList("companyId", "bankAccountId"));
+        eventToUuidMap.put("company.created", Collections.singletonList("companyId"));
+        eventToUuidMap.put("company.updated", Collections.singletonList("companyId"));
+        eventToUuidMap.put("employee.created", Arrays.asList("companyId", "employeeId"));
+        eventToUuidMap.put("employee.terminated", Arrays.asList("companyId", "employeeId"));
+        eventToUuidMap.put("payroll.processed", Arrays.asList("companyId", "payrollId", "payScheduleId"));
+    }
+
+    public List<String> getRequiredUuidsForEvent(String eventType) {
+        return eventToUuidMap.getOrDefault(eventType, Collections.emptyList());
+    }
+}
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Service
+public class UUIDValidationRegistry {
+
+    private final Map<String, UUIDValidationService> uuidValidationMap = new HashMap<>();
+
+    @Autowired
+    public UUIDValidationRegistry(CompanyUUIDValidationService companyUUIDValidationService,
+                                  EmployeeUUIDValidationService employeeUUIDValidationService,
+                                  ContractorUUIDValidationService contractorUUIDValidationService,
+                                  BankAccountUUIDValidationService bankAccountUUIDValidationService,
+                                  PayrollUUIDValidationService payrollUUIDValidationService,
+                                  PayScheduleUUIDValidationService payScheduleUUIDValidationService) {
+
+        uuidValidationMap.put("companyId", companyUUIDValidationService);
+        uuidValidationMap.put("employeeId", employeeUUIDValidationService);
+        uuidValidationMap.put("contractorId", contractorUUIDValidationService);
+        uuidValidationMap.put("bankAccountId", bankAccountUUIDValidationService);
+        uuidValidationMap.put("payrollId", payrollUUIDValidationService);
+        uuidValidationMap.put("payScheduleId", payScheduleUUIDValidationService);
+    }
+
+    public UUIDValidationService getValidationService(String uuidKey) {
+        return uuidValidationMap.get(uuidKey);
+    }
+}
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@Service
+public class EventProcessorService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(EventProcessorService.class);
+    private final EventRegistry eventRegistry;
+    private final UUIDValidationRegistry uuidValidationRegistry;
+    private final InternalQueueService internalQueueService;
+    private final ObjectMapper objectMapper;
+
+    public EventProcessorService(EventRegistry eventRegistry, UUIDValidationRegistry uuidValidationRegistry,
+                                 InternalQueueService internalQueueService) {
+        this.eventRegistry = eventRegistry;
+        this.uuidValidationRegistry = uuidValidationRegistry;
+        this.internalQueueService = internalQueueService;
+        this.objectMapper = new ObjectMapper();
+    }
+
+    @Transactional
+    public void processEvent(String payload) {
+        try {
+            // Parse JSON dynamically
+            JsonNode rootNode = objectMapper.readTree(payload);
+            String eventType = rootNode.get("eventType").asText();
+            LOGGER.info("Received event: {}", eventType);
+
+            // Get required UUIDs for the event
+            List<String> requiredUuids = eventRegistry.getRequiredUuidsForEvent(eventType);
+            if (requiredUuids.isEmpty()) {
+                LOGGER.warn("No UUID validations required for event type: {}", eventType);
+                return;
+            }
+
+            // Validate all required UUIDs
+            boolean allValid = true;
+            for (String uuidKey : requiredUuids) {
+                if (rootNode.has(uuidKey)) {
+                    String uuidValue = rootNode.get(uuidKey).asText();
+                    UUIDValidationService validationService = uuidValidationRegistry.getValidationService(uuidKey);
+
+                    if (validationService != null && !validationService.validate(uuidValue)) {
+                        LOGGER.warn("Validation failed for UUID: {} in event: {}", uuidValue, eventType);
+                        allValid = false;
+                    }
+                } else {
+                    LOGGER.warn("Missing required UUID: {} in event: {}", uuidKey, eventType);
+                    allValid = false;
+                }
+            }
+
+            // If all UUIDs are valid, publish to internal queue
+            if (allValid) {
+                LOGGER.info("All UUID validations passed, publishing event: {}", rootNode);
+                internalQueueService.publishToInternalQueue(payload);
+            } else {
+                throw new RuntimeException("One or more UUIDs failed validation");
+            }
+
+        } catch (Exception e) {
+            LOGGER.error("Failed to process event: {}", payload, e);
+            throw new RuntimeException("Processing error", e);
+        }
+    }
+}
+
+@Service
+public class CompanyUUIDValidationService implements UUIDValidationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CompanyUUIDValidationService.class);
+    private final CompanyRepository companyRepository;
+
+    @Autowired
+    public CompanyUUIDValidationService(CompanyRepository companyRepository) {
+        this.companyRepository = companyRepository;
+    }
+
+    @Override
+    public boolean validate(String uuid) {
+        return companyRepository.existsById(uuid);
+    }
+}
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@Service
+public class EventProcessorService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(EventProcessorService.class);
+    private final EventRegistry eventRegistry;
+    private final UUIDValidationRegistry uuidValidationRegistry;
+    private final InternalQueueService internalQueueService;
+    private final ObjectMapper objectMapper;
+
+    public EventProcessorService(EventRegistry eventRegistry, UUIDValidationRegistry uuidValidationRegistry,
+                                 InternalQueueService internalQueueService) {
+        this.eventRegistry = eventRegistry;
+        this.uuidValidationRegistry = uuidValidationRegistry;
+        this.internalQueueService = internalQueueService;
+        this.objectMapper = new ObjectMapper();
+    }
+
+    @Transactional
+    public void processEvent(String payload) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(payload);
+            String eventType = rootNode.get("eventType").asText();
+            LOGGER.info("Processing event | EventType={} | Payload={}", eventType, payload);
+
+            List<String> requiredUuids = eventRegistry.getRequiredUuidsForEvent(eventType);
+            if (requiredUuids.isEmpty()) {
+                LOGGER.warn("No UUID validations required | EventType={}", eventType);
+                return;
+            }
+
+            boolean allValid = true;
+            for (String uuidKey : requiredUuids) {
+                if (rootNode.has(uuidKey)) {
+                    String uuidValue = rootNode.get(uuidKey).asText();
+                    UUIDValidationService validationService = uuidValidationRegistry.getValidationService(uuidKey);
+
+                    if (validationService != null && !validationService.validate(uuidValue)) {
+                        LOGGER.error("ERR_VALIDATION_FAIL | EventType={} | UUID={} | Reason=UUID validation failed", eventType, uuidValue);
+                        allValid = false;
+                    }
+                } else {
+                    LOGGER.error("ERR_MISSING_UUID | EventType={} | UUIDKey={} | Reason=Missing required UUID in payload", eventType, uuidKey);
+                    allValid = false;
+                }
+            }
+
+            if (allValid) {
+                LOGGER.info("All UUID validations passed | EventType={} | Publishing event to internal queue", eventType);
+                internalQueueService.publishToInternalQueue(payload);
+            } else {
+                LOGGER.error("ERR_EVENT_PROCESSING | EventType={} | Reason=One or more UUIDs failed validation", eventType);
+            }
+
+        } catch (Exception e) {
+            LOGGER.error("ERR_PROCESSING_FAILURE | EventType=Unknown | Reason={} | Payload={}", e.getMessage(), payload);
+        }
+    }
+}
+
+@Service
+public class CompanyUUIDValidationService implements UUIDValidationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CompanyUUIDValidationService.class);
+    private final CompanyRepository companyRepository;
+
+    @Autowired
+    public CompanyUUIDValidationService(CompanyRepository companyRepository) {
+        this.companyRepository = companyRepository;
+    }
+
+    @Override
+    public boolean validate(String uuid) {
+        boolean exists = companyRepository.existsById(uuid);
+        if (!exists) {
+            LOGGER.error("ERR_UUID_NOT_FOUND | UUIDType=Company | UUID={} | Reason=UUID does not exist in database", uuid);
+        }
+        return exists;
+    }
+}
+@Component
+public class SqsListener {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SqsListener.class);
+    private final SqsClient sqsClient;
+    private final EventProcessorService eventProcessorService;
+    private final AwsSqsConfig awsSqsConfig;
+
+    @Autowired
+    public SqsListener(SqsClient sqsClient, EventProcessorService eventProcessorService, AwsSqsConfig awsSqsConfig) {
+        this.sqsClient = sqsClient;
+        this.eventProcessorService = eventProcessorService;
+        this.awsSqsConfig = awsSqsConfig;
+    }
+
+    @Scheduled(fixedDelay = 5000)
+    public void listenToQueue() {
+        try {
+            processQueue(awsSqsConfig.getQueueUrl());
+        } catch (Exception e) {
+            LOGGER.error("ERR_SQS_LISTENER_DOWN | Reason=Failed to listen to SQS queue | Details={}", e.getMessage());
+        }
+    }
+
+    private void processQueue(String queueUrl) {
+        ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .maxNumberOfMessages(10)
+                .waitTimeSeconds(10)
+                .build();
+
+        ReceiveMessageResponse response = sqsClient.receiveMessage(request);
+
+        for (Message message : response.messages()) {
+            try {
+                eventProcessorService.processEvent(message.body());
+                deleteMessage(message, queueUrl);
+            } catch (Exception e) {
+                LOGGER.error("ERR_SQS_MESSAGE_PROCESSING | MessageID={} | Reason={}", message.messageId(), e.getMessage());
+            }
+        }
+    }
+
+    private void deleteMessage(Message message, String queueUrl) {
+        try {
+            sqsClient.deleteMessage(DeleteMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .receiptHandle(message.receiptHandle())
+                    .build());
+        } catch (Exception e) {
+            LOGGER.error("ERR_SQS_DELETE_FAILURE | MessageID={} | Reason=Failed to delete message from queue", message.messageId());
+        }
+    }
+}

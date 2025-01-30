@@ -1,0 +1,121 @@
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.aspectj.lang.JoinPoint;
+import org.aspectj.lang.annotation.AfterReturning;
+import org.aspectj.lang.annotation.AfterThrowing;
+import org.aspectj.lang.annotation.Aspect;
+import org.springframework.stereotype.Component;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Aspect
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class EventLogAspect {
+
+    private final PyrlEventLogRepository eventLogRepository;
+    private final ObjectMapper objectMapper; // Inject Jackson ObjectMapper
+
+    @AfterReturning(value = "@annotation(LogEvent)", returning = "result")
+    public void logSuccessEvent(JoinPoint joinPoint, Object result) {
+        log.info("Logging event for method: {}", joinPoint.getSignature().getName());
+
+        try {
+            JsonNode jsonNode = parseJson(result);
+            if (jsonNode == null) {
+                log.warn("Skipping event log: Unable to parse JSON from result.");
+                return;
+            }
+
+            // Extract event fields
+            String eventType = getJsonField(jsonNode, "event_type");
+            String eventUuid = getJsonField(jsonNode, "uuid");
+            String resourceType = getJsonField(jsonNode, "resource_type");
+            String resourceUuid = getJsonField(jsonNode, "resource_uuid");
+            String entityType = getJsonField(jsonNode, "entity_type");
+            String entityUuid = getJsonField(jsonNode, "entity_uuid");
+
+            // Save event log entry
+            PyrlEventLog eventLog = PyrlEventLog.builder()
+                    .pyrlEvntLogId(UUID.randomUUID())
+                    .srcEvntId(eventUuid != null ? eventUuid : UUID.randomUUID().toString())
+                    .srcEvntType(eventType != null ? eventType : joinPoint.getSignature().getName())
+                    .srcEvntSts("SUCCESS")
+                    .srcEvntTs(LocalDateTime.now())
+                    .resourceType(resourceType != null ? resourceType : "UNKNOWN")
+                    .resourceId(resourceUuid != null ? resourceUuid : UUID.randomUUID().toString())
+                    .entityType(entityType != null ? entityType : "UNKNOWN")
+                    .entityId(entityUuid != null ? entityUuid : UUID.randomUUID().toString())
+                    .status("SUCCESS")
+                    .statusRsn(null)
+                    .creTs(LocalDateTime.now())
+                    .creUsrId("SYSTEM")
+                    .updtTs(LocalDateTime.now())
+                    .updtUsrId("SYSTEM")
+                    .build();
+
+            eventLogRepository.save(eventLog);
+            log.info("Event Log successfully saved for eventType: {}", eventType);
+
+        } catch (Exception e) {
+            log.error("Error while logging event for {}: {}", joinPoint.getSignature().getName(), e.getMessage(), e);
+        }
+    }
+
+    @AfterThrowing(value = "@annotation(LogEvent)", throwing = "exception")
+    public void logFailedEvent(JoinPoint joinPoint, Exception exception) {
+        log.error("Exception occurred during processing event for method: {}", joinPoint.getSignature().getName(), exception);
+
+        try {
+            // Save failed event log
+            PyrlEventLog eventLog = PyrlEventLog.builder()
+                    .pyrlEvntLogId(UUID.randomUUID())
+                    .srcEvntId(UUID.randomUUID().toString())
+                    .srcEvntType(joinPoint.getSignature().getName())
+                    .srcEvntSts("FAILED")
+                    .srcEvntTs(LocalDateTime.now())
+                    .resourceType("UNKNOWN")
+                    .resourceId(UUID.randomUUID().toString())
+                    .entityType("UNKNOWN")
+                    .entityId(UUID.randomUUID().toString())
+                    .status("FAILED")
+                    .statusRsn(exception.getMessage()) // Capture the error message
+                    .creTs(LocalDateTime.now())
+                    .creUsrId("SYSTEM")
+                    .updtTs(LocalDateTime.now())
+                    .updtUsrId("SYSTEM")
+                    .build();
+
+            eventLogRepository.save(eventLog);
+            log.error("Event Log for FAILED event saved with exception: {}", exception.getMessage());
+
+        } catch (Exception e) {
+            log.error("Error while logging failure for event: {}", joinPoint.getSignature().getName(), e);
+        }
+    }
+
+    /**
+     * Utility method to parse JSON object from the method result
+     */
+    private JsonNode parseJson(Object result) {
+        if (result == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(objectMapper.writeValueAsString(result));
+        } catch (Exception e) {
+            log.error("Error parsing JSON from result: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Utility method to extract a field value from JsonNode
+     */
+    private String getJsonField(JsonNode jsonNode, String fieldName) {
+        return jsonNode.has(fieldName) ? jsonNode.get(fieldName).asText() : null;
+    }
+}

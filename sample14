@@ -1,0 +1,158 @@
+package net.jpmchase.payroll.event.validation;
+
+import java.util.*;
+
+public enum EntityType {
+    BANK_ACCOUNT("BankAccount", 
+        Arrays.asList(UUIDValidationService.BANK_ACCOUNT),
+        Arrays.asList("companyId", "bankAccountId"),
+        Map.of(
+            "bank_account.created", Arrays.asList("companyId", "bankAccountId", "externalBankRefId"),
+            "bank_account.verified", Arrays.asList("companyId", "bankAccountId")
+        )
+    ),
+
+    COMPANY("Company", 
+        Arrays.asList(UUIDValidationService.COMPANY),
+        Arrays.asList("companyId"),
+        Map.of(
+            "company.partner_authorized", Arrays.asList("companyId", "partnerId")
+        )
+    ),
+
+    EMPLOYEE("Employee", 
+        Arrays.asList(UUIDValidationService.EMPLOYEE),
+        Arrays.asList("companyId", "payeeId"),
+        Map.of(
+            "employee.terminated", Arrays.asList("companyId", "payeeId", "terminationId")
+        )
+    ),
+
+    PAYROLL("Payroll", 
+        Arrays.asList(UUIDValidationService.PAYROLL),
+        Arrays.asList("companyId", "payrollId"),
+        Map.of(
+            "payroll.processed", Arrays.asList("companyId", "payrollId", "approvalUserId")
+        )
+    );
+
+    private final String entityName;
+    private final List<UUIDValidationService> validationServices;
+    private final List<String> defaultUuids;
+    private final Map<String, List<String>> eventSpecificUuids;
+
+    EntityType(String entityName, List<UUIDValidationService> validationServices, 
+               List<String> defaultUuids, Map<String, List<String>> eventSpecificUuids) {
+        this.entityName = entityName;
+        this.validationServices = validationServices;
+        this.defaultUuids = defaultUuids;
+        this.eventSpecificUuids = eventSpecificUuids;
+    }
+
+    public String getEntityName() {
+        return entityName;
+    }
+
+    public List<UUIDValidationService> getValidationServices() {
+        return validationServices;
+    }
+
+    public List<String> getDefaultUuids() {
+        return defaultUuids;
+    }
+
+    public List<String> getUuidsForEvent(String eventType) {
+        return eventSpecificUuids.getOrDefault(eventType, defaultUuids);
+    }
+
+    private static final Map<String, EntityType> EVENT_TO_ENTITY_MAP = new HashMap<>();
+    
+    static {
+        for (EntityType entity : EntityType.values()) {
+            entity.eventSpecificUuids.keySet().forEach(event -> EVENT_TO_ENTITY_MAP.put(event, entity));
+        }
+    }
+
+    public static EntityType fromEventType(String eventType) {
+        return EVENT_TO_ENTITY_MAP.getOrDefault(eventType, inferEntityFromName(eventType));
+    }
+
+    private static EntityType inferEntityFromName(String eventType) {
+        if (eventType.startsWith("bank_account")) return BANK_ACCOUNT;
+        if (eventType.startsWith("company")) return COMPANY;
+        if (eventType.startsWith("employee")) return EMPLOYEE;
+        if (eventType.startsWith("payroll")) return PAYROLL;
+        throw new IllegalArgumentException("Unknown entity type for event: " + eventType);
+    }
+}
+package net.jpmchase.payroll.event.service;
+
+import net.jpmchase.payroll.event.validation.EntityType;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+public class EventRegistry {
+
+    public EntityType getEntityTypeForEvent(String eventType) {
+        return EntityType.fromEventType(eventType);
+    }
+
+    public List<String> getRequiredUuidsForEvent(String eventType) {
+        EntityType entityType = getEntityTypeForEvent(eventType);
+        return entityType.getUuidsForEvent(eventType);
+    }
+}
+package net.jpmchase.payroll.event.validation;
+
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+public class UUIDValidationRegistry {
+
+    public List<UUIDValidationService> getValidationServicesForEntity(EntityType entityType) {
+        return entityType.getValidationServices();
+    }
+}
+
+package net.jpmchase.payroll.event.validation;
+
+import java.util.*;
+
+public enum EntityType {
+    BANK_ACCOUNT("BankAccount",
+        Arrays.asList(UUIDValidationService.BANK_ACCOUNT),
+        Arrays.asList("companyId", "bankAccountId"),  // Default UUIDs
+        Map.of(
+            "bank_account.created", Arrays.asList("companyId", "bankAccountId", "externalBankRefId")
+        )
+    ),
+
+    COMPANY("Company",
+        Arrays.asList(UUIDValidationService.COMPANY),
+        Arrays.asList("companyId"),
+        Map.of() // No event-specific UUIDs, defaults always used
+    );
+
+    private final String entityName;
+    private final List<UUIDValidationService> validationServices;
+    private final List<String> defaultUuids;
+    private final Map<String, List<String>> eventSpecificUuids;
+
+    EntityType(String entityName, List<UUIDValidationService> validationServices,
+               List<String> defaultUuids, Map<String, List<String>> eventSpecificUuids) {
+        this.entityName = entityName;
+        this.validationServices = validationServices;
+        this.defaultUuids = defaultUuids;
+        this.eventSpecificUuids = eventSpecificUuids;
+    }
+
+    public List<String> getUuidsForEvent(String eventType) {
+        return eventSpecificUuids.getOrDefault(eventType, defaultUuids);
+    }
+}
+
+

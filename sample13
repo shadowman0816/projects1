@@ -1,12 +1,17 @@
+package net.jpmchase.payroll.event.aspect;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.jpmchase.payroll.event.model.PyrlEventLog;
+import net.jpmchase.payroll.event.repository.PyrlEventLogRepository;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.AfterReturning;
 import org.aspectj.lang.annotation.AfterThrowing;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.stereotype.Component;
+
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,78 +23,36 @@ import java.util.UUID;
 public class EventLogAspect {
 
     private final PyrlEventLogRepository eventLogRepository;
-    private final ObjectMapper objectMapper; // Jackson ObjectMapper for JSON handling
+    private final ObjectMapper objectMapper;
 
-    private static final int MAX_RETRIES = 3; // Define the max retry limit
+    private static final int MAX_RETRIES = 3;
+    private static final String SYSTEM_USER = "SYSTEM";
 
     @AfterReturning(value = "@annotation(LogEvent)", returning = "result")
     public void logSuccessEvent(JoinPoint joinPoint, Object result) {
-        log.info("Logging successful event for method: {}", joinPoint.getSignature().getName());
+        log.info("[EVENT-LOG] Processing success for method: {}", joinPoint.getSignature().getName());
 
         try {
             JsonNode jsonNode = parseJson(result);
             if (jsonNode == null) {
-                log.warn("Skipping event log update: Unable to parse JSON from result.");
+                log.warn("[EVENT-LOG] Skipping event log update: Unable to parse JSON from result.");
                 return;
             }
 
-            // Extract fields dynamically
-            String eventUuid = getJsonField(jsonNode, "uuid");
-            String eventType = getJsonField(jsonNode, "event_type");
-            String resourceType = getJsonField(jsonNode, "resource_type");
-            String resourceUuid = getJsonField(jsonNode, "resource_uuid");
-            String entityType = getJsonField(jsonNode, "entity_type");
-            String entityUuid = getJsonField(jsonNode, "entity_uuid");
-
-            // Check if the event already exists
-            Optional<PyrlEventLog> existingLog = eventLogRepository.findBySrcEvntId(eventUuid);
-            PyrlEventLog eventLog;
-
-            if (existingLog.isPresent()) {
-                // Update existing log
-                eventLog = existingLog.get();
-                eventLog.setSrcEvntSts("SUCCESS");
-                eventLog.setRetryCount(0); // Reset retries after success
-                eventLog.setUpdtTs(LocalDateTime.now());
-                eventLog.setUpdtUsrId("SYSTEM");
-                log.info("Updated existing Event Log for eventType: {}", eventType);
-            } else {
-                // Create new event log if not found
-                eventLog = PyrlEventLog.builder()
-                        .pyrlEvntLogId(UUID.randomUUID())
-                        .srcEvntId(eventUuid != null ? eventUuid : UUID.randomUUID().toString())
-                        .srcEvntType(eventType != null ? eventType : joinPoint.getSignature().getName())
-                        .srcEvntSts("SUCCESS")
-                        .retryCount(0)
-                        .srcEvntTs(LocalDateTime.now())
-                        .resourceType(resourceType != null ? resourceType : "UNKNOWN")
-                        .resourceId(resourceUuid != null ? resourceUuid : UUID.randomUUID().toString())
-                        .entityType(entityType != null ? entityType : "UNKNOWN")
-                        .entityId(entityUuid != null ? entityUuid : UUID.randomUUID().toString())
-                        .status("SUCCESS")
-                        .statusRsn(null)
-                        .creTs(LocalDateTime.now())
-                        .creUsrId("SYSTEM")
-                        .updtTs(LocalDateTime.now())
-                        .updtUsrId("SYSTEM")
-                        .build();
-                log.info("New Event Log saved for eventType: {}", eventType);
-            }
-
-            // Save to database
+            PyrlEventLog eventLog = createOrUpdateEventLog(jsonNode, "SUCCESS", 0, null);
             eventLogRepository.save(eventLog);
+            log.info("[EVENT-LOG] Event logged successfully: EventID={}, EventType={}", eventLog.getSrcEvntId(), eventLog.getSrcEvntType());
 
         } catch (Exception e) {
-            log.error("Error while logging event for {}: {}", joinPoint.getSignature().getName(), e.getMessage(), e);
+            log.error("[EVENT-LOG] Error while logging success event for {}: {}", joinPoint.getSignature().getName(), e.getMessage(), e);
         }
     }
 
     @AfterThrowing(value = "@annotation(LogEvent)", throwing = "exception")
     public void logFailedEvent(JoinPoint joinPoint, Exception exception) {
-        log.error("Exception occurred during event processing for method: {}", joinPoint.getSignature().getName(), exception);
+        log.error("[EVENT-LOG] Exception occurred during event processing for method: {}", joinPoint.getSignature().getName(), exception);
 
         try {
-            // Check if the event already exists
             Optional<PyrlEventLog> existingLog = eventLogRepository.findTopByOrderByCreTsDesc();
             PyrlEventLog eventLog;
 
@@ -98,46 +61,26 @@ public class EventLogAspect {
                 int retryCount = eventLog.getRetryCount();
 
                 if (retryCount < MAX_RETRIES) {
-                    // Retry the event processing
                     eventLog.setRetryCount(retryCount + 1);
                     eventLog.setSrcEvntSts("RETRYING");
-                    log.info("Retrying event {} - Attempt {}/{}", eventLog.getSrcEvntId(), retryCount + 1, MAX_RETRIES);
+                    log.info("[EVENT-LOG] Retrying event {} - Attempt {}/{}", eventLog.getSrcEvntId(), retryCount + 1, MAX_RETRIES);
                 } else {
-                    // Mark event as permanently failed
                     eventLog.setSrcEvntSts("PERMANENTLY_FAILED");
                     eventLog.setStatusRsn(exception.getMessage());
-                    log.warn("Event {} permanently failed after {} retries", eventLog.getSrcEvntId(), MAX_RETRIES);
+                    log.warn("[EVENT-LOG] Event {} permanently failed after {} retries", eventLog.getSrcEvntId(), MAX_RETRIES);
                 }
                 eventLog.setUpdtTs(LocalDateTime.now());
-                eventLog.setUpdtUsrId("SYSTEM");
+                eventLog.setUpdtUsrId(SYSTEM_USER);
 
             } else {
-                // If no event exists, create a new one with FAILED status
-                eventLog = PyrlEventLog.builder()
-                        .pyrlEvntLogId(UUID.randomUUID())
-                        .srcEvntId(UUID.randomUUID().toString())
-                        .srcEvntType(joinPoint.getSignature().getName())
-                        .srcEvntSts("FAILED")
-                        .retryCount(1) // First failure
-                        .srcEvntTs(LocalDateTime.now())
-                        .resourceType("UNKNOWN")
-                        .resourceId(UUID.randomUUID().toString())
-                        .entityType("UNKNOWN")
-                        .entityId(UUID.randomUUID().toString())
-                        .status("FAILED")
-                        .statusRsn(exception.getMessage())
-                        .creTs(LocalDateTime.now())
-                        .creUsrId("SYSTEM")
-                        .updtTs(LocalDateTime.now())
-                        .updtUsrId("SYSTEM")
-                        .build();
-                log.info("Created new failed event log entry.");
+                eventLog = createOrUpdateEventLog(null, "FAILED", 1, exception.getMessage());
+                log.info("[EVENT-LOG] Created new failed event log entry.");
             }
 
             eventLogRepository.save(eventLog);
 
         } catch (Exception e) {
-            log.error("Error while logging failure for event: {}", joinPoint.getSignature().getName(), e);
+            log.error("[EVENT-LOG] Error while logging failure for event: {}", joinPoint.getSignature().getName(), e);
         }
     }
 
@@ -146,12 +89,45 @@ public class EventLogAspect {
         try {
             return objectMapper.readTree(objectMapper.writeValueAsString(result));
         } catch (Exception e) {
-            log.error("Error parsing JSON from result: {}", e.getMessage());
+            log.error("[EVENT-LOG] Error parsing JSON from result: {}", e.getMessage());
             return null;
         }
     }
 
-    private String getJsonField(JsonNode jsonNode, String fieldName) {
-        return jsonNode.has(fieldName) ? jsonNode.get(fieldName).asText() : null;
+    private PyrlEventLog createOrUpdateEventLog(JsonNode jsonNode, String status, int retryCount, String failureReason) {
+        String eventUuid = getJsonField(jsonNode, "uuid", UUID.randomUUID().toString());
+        String eventType = getJsonField(jsonNode, "event_type", "UNKNOWN");
+        String resourceType = getJsonField(jsonNode, "resource_type", "UNKNOWN");
+        String resourceUuid = getJsonField(jsonNode, "resource_uuid", UUID.randomUUID().toString());
+        String entityType = getJsonField(jsonNode, "entity_type", "UNKNOWN");
+        String entityUuid = getJsonField(jsonNode, "entity_uuid", UUID.randomUUID().toString());
+
+        Optional<PyrlEventLog> existingLog = eventLogRepository.findBySrcEvntId(eventUuid);
+        PyrlEventLog eventLog = existingLog.orElseGet(() -> PyrlEventLog.builder()
+                .pyrlEvntLogId(UUID.randomUUID())
+                .srcEvntId(eventUuid)
+                .srcEvntType(eventType)
+                .srcEvntTs(LocalDateTime.now())
+                .resourceType(resourceType)
+                .resourceId(resourceUuid)
+                .entityType(entityType)
+                .entityId(entityUuid)
+                .creTs(LocalDateTime.now())
+                .creUsrId(SYSTEM_USER)
+                .build());
+
+        eventLog.setSrcEvntSts(status);
+        eventLog.setRetryCount(retryCount);
+        eventLog.setStatus(status);
+        eventLog.setStatusRsn(failureReason);
+        eventLog.setUpdtTs(LocalDateTime.now());
+        eventLog.setUpdtUsrId(SYSTEM_USER);
+
+        return eventLog;
+    }
+
+    private String getJsonField(JsonNode jsonNode, String fieldName, String defaultValue) {
+        return jsonNode != null && jsonNode.has(fieldName) ? jsonNode.get(fieldName).asText() : defaultValue;
     }
 }
+

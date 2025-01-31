@@ -130,4 +130,148 @@ public class EventLogAspect {
         return jsonNode != null && jsonNode.has(fieldName) ? jsonNode.get(fieldName).asText() : defaultValue;
     }
 }
+package net.jpmchase.payroll.event.aspect;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import net.jpmchase.payroll.event.model.PyrlEventLog;
+import net.jpmchase.payroll.event.repository.PyrlEventLogRepository;
+import org.aspectj.lang.JoinPoint;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.mockito.junit.jupiter.MockitoExtension;
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class EventLogAspectTest {
+
+    @InjectMocks
+    private EventLogAspect eventLogAspect;
+
+    @Mock
+    private PyrlEventLogRepository eventLogRepository;
+
+    @Mock
+    private JoinPoint joinPoint;
+
+    @Mock
+    private ObjectMapper objectMapper;
+
+    private String validJson;
+    private JsonNode validJsonNode;
+
+    @BeforeEach
+    void setup() throws Exception {
+        validJson = "{ \"uuid\": \"123e4567-e89b-12d3-a456-426614174000\", " +
+                "\"event_type\": \"bank_account.created\", " +
+                "\"resource_type\": \"Company\", " +
+                "\"resource_uuid\": \"456e7890-e89b-12d3-a456-426614174111\", " +
+                "\"entity_type\": \"BankAccount\", " +
+                "\"entity_uuid\": \"789e0123-e89b-12d3-a456-426614174222\" }";
+
+        validJsonNode = new ObjectMapper().readTree(validJson);
+        when(objectMapper.readTree(anyString())).thenReturn(validJsonNode);
+    }
+
+    /** ✅ Test Case: Logs a successful event */
+    @Test
+    void testLogSuccessEvent_NewEvent() {
+        when(eventLogRepository.findBySrcEvntId(anyString())).thenReturn(Optional.empty());
+
+        eventLogAspect.logSuccessEvent(joinPoint, validJson);
+
+        ArgumentCaptor<PyrlEventLog> captor = ArgumentCaptor.forClass(PyrlEventLog.class);
+        verify(eventLogRepository).save(captor.capture());
+
+        PyrlEventLog savedLog = captor.getValue();
+        assertEquals("SUCCESS", savedLog.getSrcEvntSts());
+        assertEquals("bank_account.created", savedLog.getSrcEvntType());
+        assertEquals("Company", savedLog.getResourceType());
+        assertEquals("BankAccount", savedLog.getEntityType());
+    }
+
+    /** ✅ Test Case: Updates an existing event log */
+    @Test
+    void testLogSuccessEvent_UpdateExistingEvent() {
+        PyrlEventLog existingLog = new PyrlEventLog();
+        existingLog.setSrcEvntId("123e4567-e89b-12d3-a456-426614174000");
+        existingLog.setSrcEvntSts("PENDING");
+
+        when(eventLogRepository.findBySrcEvntId(anyString())).thenReturn(Optional.of(existingLog));
+
+        eventLogAspect.logSuccessEvent(joinPoint, validJson);
+
+        verify(eventLogRepository).save(existingLog);
+        assertEquals("SUCCESS", existingLog.getSrcEvntSts());
+        assertEquals(0, existingLog.getRetryCount());
+    }
+
+    /** ✅ Test Case: Handles a failed event and retries */
+    @Test
+    void testLogFailedEvent_WithRetry() {
+        PyrlEventLog existingLog = new PyrlEventLog();
+        existingLog.setSrcEvntId("123e4567-e89b-12d3-a456-426614174000");
+        existingLog.setSrcEvntSts("RETRYING");
+        existingLog.setRetryCount(2);
+
+        when(eventLogRepository.findTopByOrderByCreTsDesc()).thenReturn(Optional.of(existingLog));
+
+        Exception simulatedException = new RuntimeException("Processing error");
+        eventLogAspect.logFailedEvent(joinPoint, simulatedException);
+
+        verify(eventLogRepository).save(existingLog);
+        assertEquals("RETRYING", existingLog.getSrcEvntSts());
+        assertEquals(3, existingLog.getRetryCount());
+    }
+
+    /** ✅ Test Case: Exceeds max retries and marks as permanently failed */
+    @Test
+    void testLogFailedEvent_MaxRetriesExceeded() {
+        PyrlEventLog existingLog = new PyrlEventLog();
+        existingLog.setSrcEvntId("123e4567-e89b-12d3-a456-426614174000");
+        existingLog.setRetryCount(3);
+
+        when(eventLogRepository.findTopByOrderByCreTsDesc()).thenReturn(Optional.of(existingLog));
+
+        Exception simulatedException = new RuntimeException("Permanent failure");
+        eventLogAspect.logFailedEvent(joinPoint, simulatedException);
+
+        verify(eventLogRepository).save(existingLog);
+        assertEquals("PERMANENTLY_FAILED", existingLog.getSrcEvntSts());
+        assertEquals("Permanent failure", existingLog.getStatusRsn());
+    }
+
+    /** ✅ Test Case: Creates new failed log entry if no existing log found */
+    @Test
+    void testLogFailedEvent_NewFailureEvent() {
+        when(eventLogRepository.findTopByOrderByCreTsDesc()).thenReturn(Optional.empty());
+
+        Exception simulatedException = new RuntimeException("Processing failed");
+        eventLogAspect.logFailedEvent(joinPoint, simulatedException);
+
+        ArgumentCaptor<PyrlEventLog> captor = ArgumentCaptor.forClass(PyrlEventLog.class);
+        verify(eventLogRepository).save(captor.capture());
+
+        PyrlEventLog savedLog = captor.getValue();
+        assertEquals("FAILED", savedLog.getSrcEvntSts());
+        assertEquals("Processing failed", savedLog.getStatusRsn());
+    }
+
+    /** ✅ Test Case: Handles JSON parsing errors gracefully */
+    @Test
+    void testLogEvent_InvalidJson() throws Exception {
+        when(objectMapper.readTree(anyString())).thenThrow(new RuntimeException("Invalid JSON"));
+
+        eventLogAspect.logSuccessEvent(joinPoint, "invalid_json");
+
+        verify(eventLogRepository, never()).save(any());
+    }
+}
 

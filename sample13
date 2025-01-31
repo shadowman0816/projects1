@@ -8,6 +8,7 @@ import org.aspectj.lang.annotation.AfterThrowing;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 @Aspect
@@ -17,48 +18,66 @@ import java.util.UUID;
 public class EventLogAspect {
 
     private final PyrlEventLogRepository eventLogRepository;
-    private final ObjectMapper objectMapper; // Inject Jackson ObjectMapper
+    private final ObjectMapper objectMapper; // Jackson ObjectMapper for JSON handling
+
+    private static final int MAX_RETRIES = 3; // Define the max retry limit
 
     @AfterReturning(value = "@annotation(LogEvent)", returning = "result")
     public void logSuccessEvent(JoinPoint joinPoint, Object result) {
-        log.info("Logging event for method: {}", joinPoint.getSignature().getName());
+        log.info("Logging successful event for method: {}", joinPoint.getSignature().getName());
 
         try {
             JsonNode jsonNode = parseJson(result);
             if (jsonNode == null) {
-                log.warn("Skipping event log: Unable to parse JSON from result.");
+                log.warn("Skipping event log update: Unable to parse JSON from result.");
                 return;
             }
 
-            // Extract event fields
-            String eventType = getJsonField(jsonNode, "event_type");
+            // Extract fields dynamically
             String eventUuid = getJsonField(jsonNode, "uuid");
+            String eventType = getJsonField(jsonNode, "event_type");
             String resourceType = getJsonField(jsonNode, "resource_type");
             String resourceUuid = getJsonField(jsonNode, "resource_uuid");
             String entityType = getJsonField(jsonNode, "entity_type");
             String entityUuid = getJsonField(jsonNode, "entity_uuid");
 
-            // Save event log entry
-            PyrlEventLog eventLog = PyrlEventLog.builder()
-                    .pyrlEvntLogId(UUID.randomUUID())
-                    .srcEvntId(eventUuid != null ? eventUuid : UUID.randomUUID().toString())
-                    .srcEvntType(eventType != null ? eventType : joinPoint.getSignature().getName())
-                    .srcEvntSts("SUCCESS")
-                    .srcEvntTs(LocalDateTime.now())
-                    .resourceType(resourceType != null ? resourceType : "UNKNOWN")
-                    .resourceId(resourceUuid != null ? resourceUuid : UUID.randomUUID().toString())
-                    .entityType(entityType != null ? entityType : "UNKNOWN")
-                    .entityId(entityUuid != null ? entityUuid : UUID.randomUUID().toString())
-                    .status("SUCCESS")
-                    .statusRsn(null)
-                    .creTs(LocalDateTime.now())
-                    .creUsrId("SYSTEM")
-                    .updtTs(LocalDateTime.now())
-                    .updtUsrId("SYSTEM")
-                    .build();
+            // Check if the event already exists
+            Optional<PyrlEventLog> existingLog = eventLogRepository.findBySrcEvntId(eventUuid);
+            PyrlEventLog eventLog;
 
+            if (existingLog.isPresent()) {
+                // Update existing log
+                eventLog = existingLog.get();
+                eventLog.setSrcEvntSts("SUCCESS");
+                eventLog.setRetryCount(0); // Reset retries after success
+                eventLog.setUpdtTs(LocalDateTime.now());
+                eventLog.setUpdtUsrId("SYSTEM");
+                log.info("Updated existing Event Log for eventType: {}", eventType);
+            } else {
+                // Create new event log if not found
+                eventLog = PyrlEventLog.builder()
+                        .pyrlEvntLogId(UUID.randomUUID())
+                        .srcEvntId(eventUuid != null ? eventUuid : UUID.randomUUID().toString())
+                        .srcEvntType(eventType != null ? eventType : joinPoint.getSignature().getName())
+                        .srcEvntSts("SUCCESS")
+                        .retryCount(0)
+                        .srcEvntTs(LocalDateTime.now())
+                        .resourceType(resourceType != null ? resourceType : "UNKNOWN")
+                        .resourceId(resourceUuid != null ? resourceUuid : UUID.randomUUID().toString())
+                        .entityType(entityType != null ? entityType : "UNKNOWN")
+                        .entityId(entityUuid != null ? entityUuid : UUID.randomUUID().toString())
+                        .status("SUCCESS")
+                        .statusRsn(null)
+                        .creTs(LocalDateTime.now())
+                        .creUsrId("SYSTEM")
+                        .updtTs(LocalDateTime.now())
+                        .updtUsrId("SYSTEM")
+                        .build();
+                log.info("New Event Log saved for eventType: {}", eventType);
+            }
+
+            // Save to database
             eventLogRepository.save(eventLog);
-            log.info("Event Log successfully saved for eventType: {}", eventType);
 
         } catch (Exception e) {
             log.error("Error while logging event for {}: {}", joinPoint.getSignature().getName(), e.getMessage(), e);
@@ -67,43 +86,63 @@ public class EventLogAspect {
 
     @AfterThrowing(value = "@annotation(LogEvent)", throwing = "exception")
     public void logFailedEvent(JoinPoint joinPoint, Exception exception) {
-        log.error("Exception occurred during processing event for method: {}", joinPoint.getSignature().getName(), exception);
+        log.error("Exception occurred during event processing for method: {}", joinPoint.getSignature().getName(), exception);
 
         try {
-            // Save failed event log
-            PyrlEventLog eventLog = PyrlEventLog.builder()
-                    .pyrlEvntLogId(UUID.randomUUID())
-                    .srcEvntId(UUID.randomUUID().toString())
-                    .srcEvntType(joinPoint.getSignature().getName())
-                    .srcEvntSts("FAILED")
-                    .srcEvntTs(LocalDateTime.now())
-                    .resourceType("UNKNOWN")
-                    .resourceId(UUID.randomUUID().toString())
-                    .entityType("UNKNOWN")
-                    .entityId(UUID.randomUUID().toString())
-                    .status("FAILED")
-                    .statusRsn(exception.getMessage()) // Capture the error message
-                    .creTs(LocalDateTime.now())
-                    .creUsrId("SYSTEM")
-                    .updtTs(LocalDateTime.now())
-                    .updtUsrId("SYSTEM")
-                    .build();
+            // Check if the event already exists
+            Optional<PyrlEventLog> existingLog = eventLogRepository.findTopByOrderByCreTsDesc();
+            PyrlEventLog eventLog;
+
+            if (existingLog.isPresent()) {
+                eventLog = existingLog.get();
+                int retryCount = eventLog.getRetryCount();
+
+                if (retryCount < MAX_RETRIES) {
+                    // Retry the event processing
+                    eventLog.setRetryCount(retryCount + 1);
+                    eventLog.setSrcEvntSts("RETRYING");
+                    log.info("Retrying event {} - Attempt {}/{}", eventLog.getSrcEvntId(), retryCount + 1, MAX_RETRIES);
+                } else {
+                    // Mark event as permanently failed
+                    eventLog.setSrcEvntSts("PERMANENTLY_FAILED");
+                    eventLog.setStatusRsn(exception.getMessage());
+                    log.warn("Event {} permanently failed after {} retries", eventLog.getSrcEvntId(), MAX_RETRIES);
+                }
+                eventLog.setUpdtTs(LocalDateTime.now());
+                eventLog.setUpdtUsrId("SYSTEM");
+
+            } else {
+                // If no event exists, create a new one with FAILED status
+                eventLog = PyrlEventLog.builder()
+                        .pyrlEvntLogId(UUID.randomUUID())
+                        .srcEvntId(UUID.randomUUID().toString())
+                        .srcEvntType(joinPoint.getSignature().getName())
+                        .srcEvntSts("FAILED")
+                        .retryCount(1) // First failure
+                        .srcEvntTs(LocalDateTime.now())
+                        .resourceType("UNKNOWN")
+                        .resourceId(UUID.randomUUID().toString())
+                        .entityType("UNKNOWN")
+                        .entityId(UUID.randomUUID().toString())
+                        .status("FAILED")
+                        .statusRsn(exception.getMessage())
+                        .creTs(LocalDateTime.now())
+                        .creUsrId("SYSTEM")
+                        .updtTs(LocalDateTime.now())
+                        .updtUsrId("SYSTEM")
+                        .build();
+                log.info("Created new failed event log entry.");
+            }
 
             eventLogRepository.save(eventLog);
-            log.error("Event Log for FAILED event saved with exception: {}", exception.getMessage());
 
         } catch (Exception e) {
             log.error("Error while logging failure for event: {}", joinPoint.getSignature().getName(), e);
         }
     }
 
-    /**
-     * Utility method to parse JSON object from the method result
-     */
     private JsonNode parseJson(Object result) {
-        if (result == null) {
-            return null;
-        }
+        if (result == null) return null;
         try {
             return objectMapper.readTree(objectMapper.writeValueAsString(result));
         } catch (Exception e) {
@@ -112,9 +151,6 @@ public class EventLogAspect {
         }
     }
 
-    /**
-     * Utility method to extract a field value from JsonNode
-     */
     private String getJsonField(JsonNode jsonNode, String fieldName) {
         return jsonNode.has(fieldName) ? jsonNode.get(fieldName).asText() : null;
     }
